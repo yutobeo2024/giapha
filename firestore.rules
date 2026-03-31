@@ -1,0 +1,131 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// This security rules file assumes the following data structures:
+//
+// Collection: members
+// Document ID: auto-generated
+// Fields:
+//   - name: string (required)
+//   - birthDate: string (optional, date format)
+//   - deathDate: string (optional, date format)
+//   - gender: string (required, enum: ["Nam", "Nữ"])
+//   - generation: number (required)
+//   - branch: string (optional)
+//   - role: string (optional)
+//   - biography: string (optional)
+//   - fatherId: string (optional)
+//   - motherId: string (optional)
+//   - spouseId: string (optional)
+//   - photoUrl: string (optional)
+//   - status: string (optional, enum: ["Alive", "Deceased"])
+//
+// Collection: events
+// Document ID: auto-generated
+// Fields:
+//   - title: string (required)
+//   - date: string (required, date-time format)
+//   - location: string (optional)
+//   - description: string (optional)
+//   - type: string (required, enum: ["Kỵ nhật", "Hội họp", "Khác"])
+//   - memberId: string (optional)
+//
+// Collection: activities
+// Document ID: auto-generated
+// Fields:
+//   - userName: string (required)
+//   - userPhoto: string (optional)
+//   - action: string (required)
+//   - timestamp: string (required, date-time format)
+//   - details: string (optional)
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "hanhtoami@gmail.com"));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidStringLength(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen;
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string &&
+        dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidMember(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.gender in ["Nam", "Nữ"] &&
+             data.generation is number && data.generation >= 1;
+    }
+
+    function isValidEvent(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             isValidDateString(data.date) &&
+             data.type in ["Kỵ nhật", "Hội họp", "Khác"];
+    }
+
+    function isValidActivity(data) {
+      return data.userName is string && data.userName.size() > 0 &&
+             data.action is string && data.action.size() > 0 &&
+             isValidDateString(data.timestamp);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /members/{memberId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidMember(request.resource.data);
+      allow update: if isAuthenticated() && isValidMember(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /events/{eventId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidEvent(request.resource.data);
+      allow update: if isAuthenticated() && isValidEvent(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /activities/{activityId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidActivity(request.resource.data);
+      allow update: if false; // Activities are immutable
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && request.auth.uid == userId && 
+                    (request.resource.data.role == resource.data.role || isAdmin());
+    }
+  }
+}

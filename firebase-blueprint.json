@@ -1,0 +1,57 @@
+{
+  "entities": {
+    "members": {
+      "title": "Family Member",
+      "description": "A member of the Nguyễn Nhuận family.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Full name of the member." },
+        "birthDate": { "type": "string", "format": "date", "description": "Birth date (optional)." },
+        "deathDate": { "type": "string", "format": "date", "description": "Death date (optional)." },
+        "gender": { "type": "string", "enum": ["Nam", "Nữ"], "description": "Gender of the member." },
+        "generation": { "type": "integer", "description": "Generation number (e.g., 1 for Thủy Tổ)." },
+        "branch": { "type": "string", "description": "Family branch (e.g., Chi 1, Chi 2)." },
+        "role": { "type": "string", "description": "Role or title (e.g., Trưởng Chi, Cháu Đích Tôn)." },
+        "biography": { "type": "string", "description": "Short biography or notes." },
+        "fatherId": { "type": "string", "description": "UID of the father." },
+        "motherId": { "type": "string", "description": "UID of the mother." },
+        "spouseId": { "type": "string", "description": "UID of the spouse." },
+        "photoUrl": { "type": "string", "description": "URL to the member's photo." },
+        "status": { "type": "string", "enum": ["Alive", "Deceased"], "description": "Current status." }
+      },
+      "required": ["name", "gender", "generation"]
+    },
+    "events": {
+      "title": "Family Event",
+      "description": "An event related to the family (e.g., Kỵ nhật, Hội họp).",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the event." },
+        "date": { "type": "string", "format": "date-time", "description": "Date and time of the event." },
+        "location": { "type": "string", "description": "Location of the event." },
+        "description": { "type": "string", "description": "Detailed description." },
+        "type": { "type": "string", "enum": ["Kỵ nhật", "Hội họp", "Khác"], "description": "Type of event." },
+        "memberId": { "type": "string", "description": "Associated member ID (e.g., for Kỵ nhật)." }
+      },
+      "required": ["title", "date", "type"]
+    },
+    "activities": {
+      "title": "Recent Activity",
+      "description": "A log of recent changes or additions to the family tree.",
+      "type": "object",
+      "properties": {
+        "userName": { "type": "string", "description": "Name of the user who performed the action." },
+        "userPhoto": { "type": "string", "description": "Photo URL of the user." },
+        "action": { "type": "string", "description": "Description of the action (e.g., 'Vừa cập nhật tiểu sử')." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the action occurred." },
+        "details": { "type": "string", "description": "Additional details or links." }
+      },
+      "required": ["userName", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "members": { "schema": "members", "description": "Collection of family members." },
+    "events": { "schema": "events", "description": "Collection of family events." },
+    "activities": { "schema": "activities", "description": "Log of recent activities." }
+  }
+}
