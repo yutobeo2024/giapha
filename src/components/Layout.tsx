@@ -11,10 +11,13 @@ import {
   LogOut, 
   Menu, 
   X, 
-  ChevronRight 
+  ChevronRight,
+  AlertTriangle
 } from "lucide-react";
 import { auth } from "../firebase";
 import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from "firebase/auth";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -22,13 +25,52 @@ interface LayoutProps {
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [userRole, setUserRole] = useState<string>("user");
+  const [isLocked, setIsLocked] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        // Check if user exists in Firestore, if not create them
+        const userRef = doc(db, "users", currentUser.uid);
+        const userSnap = await getDoc(userRef);
+        
+        if (!userSnap.exists()) {
+          const defaultRole = currentUser.email?.toLowerCase().trim() === "hanhtoami@gmail.com" ? "admin" : "user";
+          await setDoc(userRef, {
+            email: currentUser.email,
+            displayName: currentUser.displayName,
+            photoURL: currentUser.photoURL,
+            role: defaultRole,
+            isLocked: false,
+            createdAt: serverTimestamp(),
+            lastLogin: serverTimestamp()
+          });
+          setUserRole(defaultRole);
+        } else {
+          const userData = userSnap.data();
+          if (userData.isLocked) {
+            setIsLocked(true);
+            await signOut(auth);
+            setUser(null);
+            setUserRole("user");
+            return;
+          }
+          setUserRole(userData.role || "user");
+          await setDoc(userRef, { 
+            lastLogin: serverTimestamp(),
+            photoURL: currentUser.photoURL,
+            displayName: currentUser.displayName
+          }, { merge: true });
+        }
+      } else {
+        setUserRole("user");
+      }
       setUser(currentUser);
+      setIsLocked(false);
     });
     return () => unsubscribe();
   }, []);
@@ -59,11 +101,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: "Quản trị", path: "/admin", icon: Settings, adminOnly: true },
   ];
 
-  const isAdminEmail = (email: string | null | undefined) => {
-    return email?.toLowerCase().trim() === "hanhtoami@gmail.com";
+  const isAdmin = () => {
+    return userRole === "admin" || user?.email?.toLowerCase().trim() === "hanhtoami@gmail.com";
   };
 
-  const filteredNavItems = navItems.filter(item => !item.adminOnly || isAdminEmail(user?.email));
+  const filteredNavItems = navItems.filter(item => !item.adminOnly || isAdmin());
 
   return (
     <div className="min-h-screen bg-[#FDFCF9] text-[#2D2A26] font-sans">
@@ -192,6 +234,27 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               </div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Locked Account Message */}
+      <AnimatePresence>
+        {isLocked && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] w-[90%] max-w-md bg-red-50 border border-red-200 p-4 rounded-xl shadow-xl flex items-center gap-3"
+          >
+            <AlertTriangle className="w-6 h-6 text-red-600 shrink-0" />
+            <div>
+              <h4 className="font-bold text-red-900">Tài khoản bị khóa</h4>
+              <p className="text-sm text-red-700">Vui lòng liên hệ quản trị viên để biết thêm chi tiết.</p>
+            </div>
+            <button onClick={() => setIsLocked(false)} className="ml-auto p-1 hover:bg-red-100 rounded-lg">
+              <X className="w-4 h-4 text-red-600" />
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
 

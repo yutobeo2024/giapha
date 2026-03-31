@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc } from "firebase/firestore";
 import { db, auth, handleFirestoreError, OperationType } from "../firebase";
 import { onAuthStateChanged, User, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Edit2, Trash2, Save, X, Users, Calendar, Activity, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Plus, Edit2, Trash2, Save, X, Users, Calendar, Activity, AlertTriangle, CheckCircle2, Shield, ShieldAlert, Lock, Unlock } from "lucide-react";
 import { format } from "date-fns";
 
 interface FamilyMember {
@@ -31,12 +31,25 @@ interface FamilyEvent {
   type: "Kỵ nhật" | "Hội họp" | "Khác";
 }
 
+interface UserDoc {
+  id: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+  role: "admin" | "user";
+  isLocked: boolean;
+  createdAt: any;
+  lastLogin: any;
+}
+
 const Admin: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
+  const [userRole, setUserRole] = useState<string>("user");
   const [authLoading, setAuthLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"members" | "events">("members");
+  const [activeTab, setActiveTab] = useState<"members" | "events" | "users">("members");
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [events, setEvents] = useState<FamilyEvent[]>([]);
+  const [users, setUsers] = useState<UserDoc[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [formData, setFormData] = useState<any>({});
@@ -46,19 +59,32 @@ const Admin: React.FC = () => {
   const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        const userRef = doc(db, "users", currentUser.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          setUserRole(userSnap.data().role || "user");
+        }
+      } else {
+        setUserRole("user");
+      }
       setUser(currentUser);
       setAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  const isAdminEmail = (email: string | null | undefined) => {
+  const isAdmin = () => {
+    return userRole === "admin" || user?.email?.toLowerCase().trim() === "hanhtoami@gmail.com";
+  };
+
+  const isSuperAdmin = (email: string | null | undefined) => {
     return email?.toLowerCase().trim() === "hanhtoami@gmail.com";
   };
 
   useEffect(() => {
-    if (!user || !isAdminEmail(user.email)) return;
+    if (!user || !isAdmin()) return;
 
     const qMembers = query(collection(db, "members"), orderBy("generation", "asc"), orderBy("name", "asc"));
     const unsubMembers = onSnapshot(qMembers, 
@@ -80,9 +106,20 @@ const Admin: React.FC = () => {
       }
     );
 
+    const qUsers = query(collection(db, "users"), orderBy("createdAt", "desc"));
+    const unsubUsers = onSnapshot(qUsers, 
+      (snapshot) => {
+        setUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserDoc)));
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, "users");
+      }
+    );
+
     return () => {
       unsubMembers();
       unsubEvents();
+      unsubUsers();
     };
   }, [user]);
 
@@ -94,7 +131,7 @@ const Admin: React.FC = () => {
     );
   }
 
-  if (!user || !isAdminEmail(user.email)) {
+  if (!user || !isAdmin()) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-8">
         <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center text-red-600 mb-6">
@@ -179,13 +216,47 @@ const Admin: React.FC = () => {
     try {
       setLoading(true);
       await deleteDoc(doc(db, activeTab, id));
-      await logActivity(`đã xóa ${activeTab === "members" ? "thành viên" : "sự kiện"}: ${name}`);
+      let actionText = "";
+      if (activeTab === "members") actionText = "thành viên";
+      else if (activeTab === "events") actionText = "sự kiện";
+      else actionText = "người dùng";
+      
+      await logActivity(`đã xóa ${actionText}: ${name}`);
       setMessage({ type: "success", text: "Xóa thành công!" });
       setIsDeleteModalOpen(false);
       setItemToDelete(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, activeTab);
       setMessage({ type: "error", text: "Đã xảy ra lỗi khi xóa." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleUserLock = async (userId: string, currentStatus: boolean) => {
+    try {
+      setLoading(true);
+      await updateDoc(doc(db, "users", userId), { isLocked: !currentStatus });
+      await logActivity(`đã ${!currentStatus ? "khóa" : "mở khóa"} người dùng ID: ${userId}`);
+      setMessage({ type: "success", text: `${!currentStatus ? "Khóa" : "Mở khóa"} thành công!` });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, "users");
+      setMessage({ type: "error", text: "Đã xảy ra lỗi khi cập nhật trạng thái người dùng." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleUserRole = async (userId: string, currentRole: string) => {
+    try {
+      setLoading(true);
+      const newRole = currentRole === "admin" ? "user" : "admin";
+      await updateDoc(doc(db, "users", userId), { role: newRole });
+      await logActivity(`đã thay đổi quyền người dùng ID: ${userId} thành ${newRole}`);
+      setMessage({ type: "success", text: "Cập nhật quyền thành công!" });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, "users");
+      setMessage({ type: "error", text: "Đã xảy ra lỗi khi cập nhật quyền người dùng." });
     } finally {
       setLoading(false);
     }
@@ -204,20 +275,22 @@ const Admin: React.FC = () => {
           <h1 className="font-serif text-4xl font-bold mb-2">Quản trị Hệ thống</h1>
           <p className="text-[#6B665F]">Quản lý danh sách thành viên và sự kiện gia đình.</p>
         </div>
-        <button
-          onClick={() => openModal()}
-          className="flex items-center gap-2 px-6 py-3 bg-[#8B2323] text-white rounded-xl font-bold hover:bg-[#6B1B1B] transition-colors shadow-lg shadow-[#8B2323]/20"
-        >
-          <Plus className="w-5 h-5" />
-          {activeTab === "members" ? "Thêm thành viên" : "Thêm sự kiện"}
-        </button>
+        {activeTab !== "users" && (
+          <button
+            onClick={() => openModal()}
+            className="flex items-center gap-2 px-6 py-3 bg-[#8B2323] text-white rounded-xl font-bold hover:bg-[#6B1B1B] transition-colors shadow-lg shadow-[#8B2323]/20"
+          >
+            <Plus className="w-5 h-5" />
+            {activeTab === "members" ? "Thêm thành viên" : "Thêm sự kiện"}
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-4 border-b border-[#E5E1D8]">
+      <div className="flex gap-4 border-b border-[#E5E1D8] overflow-x-auto">
         <button
           onClick={() => setActiveTab("members")}
-          className={`px-6 py-4 font-bold text-sm transition-all relative ${
+          className={`px-6 py-4 font-bold text-sm transition-all relative whitespace-nowrap ${
             activeTab === "members" ? "text-[#8B2323]" : "text-[#A19D96] hover:text-[#2D2A26]"
           }`}
         >
@@ -229,7 +302,7 @@ const Admin: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab("events")}
-          className={`px-6 py-4 font-bold text-sm transition-all relative ${
+          className={`px-6 py-4 font-bold text-sm transition-all relative whitespace-nowrap ${
             activeTab === "events" ? "text-[#8B2323]" : "text-[#A19D96] hover:text-[#2D2A26]"
           }`}
         >
@@ -238,6 +311,18 @@ const Admin: React.FC = () => {
             Sự kiện ({events.length})
           </div>
           {activeTab === "events" && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-1 bg-[#8B2323] rounded-t-full" />}
+        </button>
+        <button
+          onClick={() => setActiveTab("users")}
+          className={`px-6 py-4 font-bold text-sm transition-all relative whitespace-nowrap ${
+            activeTab === "users" ? "text-[#8B2323]" : "text-[#A19D96] hover:text-[#2D2A26]"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4" />
+            Người dùng ({users.length})
+          </div>
+          {activeTab === "users" && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-1 bg-[#8B2323] rounded-t-full" />}
         </button>
       </div>
 
@@ -274,11 +359,18 @@ const Admin: React.FC = () => {
                     <th className="px-6 py-4 text-xs font-bold uppercase text-[#A19D96] tracking-widest">Giới tính</th>
                     <th className="px-6 py-4 text-xs font-bold uppercase text-[#A19D96] tracking-widest">Trạng thái</th>
                   </>
-                ) : (
+                ) : activeTab === "events" ? (
                   <>
                     <th className="px-6 py-4 text-xs font-bold uppercase text-[#A19D96] tracking-widest">Sự kiện</th>
                     <th className="px-6 py-4 text-xs font-bold uppercase text-[#A19D96] tracking-widest">Ngày diễn ra</th>
                     <th className="px-6 py-4 text-xs font-bold uppercase text-[#A19D96] tracking-widest">Loại</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="px-6 py-4 text-xs font-bold uppercase text-[#A19D96] tracking-widest">Người dùng</th>
+                    <th className="px-6 py-4 text-xs font-bold uppercase text-[#A19D96] tracking-widest">Vai trò</th>
+                    <th className="px-6 py-4 text-xs font-bold uppercase text-[#A19D96] tracking-widest">Trạng thái</th>
+                    <th className="px-6 py-4 text-xs font-bold uppercase text-[#A19D96] tracking-widest">Đăng nhập cuối</th>
                   </>
                 )}
                 <th className="px-6 py-4 text-xs font-bold uppercase text-[#A19D96] tracking-widest text-right">Thao tác</th>
@@ -324,7 +416,7 @@ const Admin: React.FC = () => {
                     </td>
                   </tr>
                 ))
-              ) : (
+              ) : activeTab === "events" ? (
                 events.map((event) => (
                   <tr key={event.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 font-bold text-[#2D2A26]">{event.title}</td>
@@ -344,6 +436,75 @@ const Admin: React.FC = () => {
                         <button onClick={() => handleDeleteClick(event.id, event.title)} className="p-2 text-[#6B665F] hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
                           <Trash2 className="w-4 h-4" />
                         </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                users.map((u) => (
+                  <tr key={u.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={u.photoURL || `https://ui-avatars.com/api/?name=${u.displayName}`}
+                          className="w-10 h-10 rounded-full border border-[#E5E1D8]"
+                        />
+                        <div className="flex flex-col">
+                          <div className="font-bold text-[#2D2A26]">{u.displayName}</div>
+                          <div className="text-xs text-[#6B665F]">{u.email}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                          u.role === "admin" ? "bg-purple-50 text-purple-600" : "bg-blue-50 text-blue-600"
+                        }`}>
+                          {u.role}
+                        </span>
+                        {isSuperAdmin(user?.email) && u.email !== user?.email && (
+                          <button 
+                            onClick={() => toggleUserRole(u.id, u.role)}
+                            className="p-1 text-[#A19D96] hover:text-[#8B2323] transition-colors"
+                            title="Thay đổi quyền"
+                          >
+                            <ShieldAlert className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                        !u.isLocked ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+                      }`}>
+                        {!u.isLocked ? "Hoạt động" : "Bị khóa"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-[#6B665F]">
+                      {u.lastLogin?.toDate ? format(u.lastLogin.toDate(), "d/M/yyyy") : "N/A"}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {u.email !== user?.email && (
+                          <>
+                            <button 
+                              onClick={() => toggleUserLock(u.id, u.isLocked)} 
+                              className={`p-2 rounded-lg transition-all ${
+                                u.isLocked ? "text-emerald-600 hover:bg-emerald-50" : "text-amber-600 hover:bg-amber-50"
+                              }`}
+                              title={u.isLocked ? "Mở khóa" : "Khóa"}
+                            >
+                              {u.isLocked ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteClick(u.id, u.displayName)} 
+                              className="p-2 text-[#6B665F] hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                              title="Xóa người dùng"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>

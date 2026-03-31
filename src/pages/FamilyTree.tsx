@@ -94,17 +94,23 @@ const FamilyTree: React.FC = () => {
             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-px h-8 bg-[#E5E1D8]" />
             
             <div className="flex gap-8 relative">
-              {/* Horizontal line connecting all children */}
-              {children.length > 1 && (
-                <div className="absolute top-0 left-[10%] right-[10%] h-px bg-[#E5E1D8]" />
-              )}
-              
               {children.map((child, index) => (
-                <div key={child.id} className="relative pt-4">
+                <div key={child.id} className="relative pt-8">
+                  {/* Horizontal line segments - Connects to siblings without overhang */}
+                  {children.length > 1 && (
+                    <div 
+                      className={cn(
+                        "absolute top-0 h-px bg-[#E5E1D8]",
+                        index === 0 ? "left-1/2 right-0" : 
+                        index === children.length - 1 ? "left-0 right-1/2" : 
+                        "left-0 right-0"
+                      )}
+                    />
+                  )}
                   {/* Vertical line from horizontal line to child */}
-                  <div className="absolute top-[-16px] left-1/2 -translate-x-1/2 w-px h-4 bg-[#E5E1D8]" />
-                  {/* Arrow head pointing to child */}
-                  <div className="absolute top-[-4px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[6px] border-t-[#E5E1D8]" />
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-px h-8 bg-[#E5E1D8]" />
+                  {/* Arrow head pointing to child - positioned near the card */}
+                  <div className="absolute top-[26px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[6px] border-t-[#E5E1D8]" />
                   <MemberNode member={child} level={level + 1} />
                 </div>
               ))}
