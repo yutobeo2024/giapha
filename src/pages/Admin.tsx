@@ -59,6 +59,7 @@ const Admin: React.FC = () => {
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -267,7 +268,25 @@ const Admin: React.FC = () => {
   const openModal = (item: any = null) => {
     setEditingItem(item);
     setFormData(item || (activeTab === "members" ? { gender: "Nam", generation: 1, status: "Alive" } : { type: "Kỵ nhật" }));
+    setImagePreview(item?.photoUrl || null);
     setIsModalOpen(true);
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 1024 * 1024) { // 1MB limit for base64 in Firestore
+        setMessage({ type: "error", text: "Kích thước ảnh quá lớn (tối đa 1MB)." });
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result as string;
+        setImagePreview(base64String);
+        setFormData({ ...formData, photoUrl: base64String });
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   return (
@@ -548,6 +567,35 @@ const Admin: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {activeTab === "members" ? (
                     <>
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Hình ảnh đại diện</label>
+                        <div className="flex items-center gap-4">
+                          <div className="w-20 h-20 rounded-full border-2 border-dashed border-[#E5E1D8] flex items-center justify-center overflow-hidden bg-[#FDFCF9]">
+                            {imagePreview ? (
+                              <img src={imagePreview} className="w-full h-full object-cover" alt="Preview" />
+                            ) : (
+                              <Users className="w-8 h-8 text-[#A19D96] opacity-20" />
+                            )}
+                          </div>
+                          <div className="flex-grow">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleImageChange}
+                              className="hidden"
+                              id="avatar-upload"
+                            />
+                            <label
+                              htmlFor="avatar-upload"
+                              className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-[#E5E1D8] rounded-xl text-sm font-bold text-[#6B665F] cursor-pointer hover:bg-gray-50 transition-all"
+                            >
+                              <Plus className="w-4 h-4" />
+                              Chọn ảnh
+                            </label>
+                            <p className="text-[10px] text-[#A19D96] mt-2">Định dạng: JPG, PNG. Tối đa 1MB.</p>
+                          </div>
+                        </div>
+                      </div>
                       <div className="md:col-span-2">
                         <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Họ và tên</label>
                         <input
