@@ -342,29 +342,50 @@ const MemberList: React.FC = () => {
                             if (!hasAny) return <p className="text-xs italic text-[#A19D96]">Chưa có thông tin hậu duệ</p>;
                             
                             return (
-                              <div className="grid grid-cols-1 gap-3">
+                              <div className="grid grid-cols-1 gap-4 pt-2">
                                 {stats.children.total > 0 && (
-                                  <div className="flex items-center justify-between text-sm">
-                                    <span className="text-[#6B665F]">Con cái:</span>
-                                    <span className="font-bold text-[#2D2A26]">
-                                      {stats.children.sons} Trai, {stats.children.daughters} Gái
-                                    </span>
+                                  <div className="flex flex-col gap-1">
+                                    <div className="text-[10px] font-bold text-[#6B665F] uppercase">Con cái ({stats.children.total})</div>
+                                    <div className="flex gap-4 text-sm">
+                                      <div className="flex items-center gap-1.5">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                        <span className="font-bold text-[#2D2A26]">{stats.children.sons} Con trai</span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-pink-500" />
+                                        <span className="font-bold text-[#2D2A26]">{stats.children.daughters} Con gái</span>
+                                      </div>
+                                    </div>
                                   </div>
                                 )}
                                 {stats.grandchildren.total > 0 && (
-                                  <div className="flex items-center justify-between text-sm">
-                                    <span className="text-[#6B665F]">Cháu:</span>
-                                    <span className="font-bold text-[#2D2A26]">
-                                      {stats.grandchildren.sons} Trai, {stats.grandchildren.daughters} Gái
-                                    </span>
+                                  <div className="flex flex-col gap-1">
+                                    <div className="text-[10px] font-bold text-[#6B665F] uppercase">Cháu nội/ngoại ({stats.grandchildren.total})</div>
+                                    <div className="flex gap-4 text-sm">
+                                      <div className="flex items-center gap-1.5">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                        <span className="font-bold text-[#2D2A26]">{stats.grandchildren.sons} Cháu trai</span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-pink-500" />
+                                        <span className="font-bold text-[#2D2A26]">{stats.grandchildren.daughters} Cháu gái</span>
+                                      </div>
+                                    </div>
                                   </div>
                                 )}
                                 {stats.greatGrandchildren.total > 0 && (
-                                  <div className="flex items-center justify-between text-sm">
-                                    <span className="text-[#6B665F]">Chắt:</span>
-                                    <span className="font-bold text-[#2D2A26]">
-                                      {stats.greatGrandchildren.sons} Trai, {stats.greatGrandchildren.daughters} Gái
-                                    </span>
+                                  <div className="flex flex-col gap-1">
+                                    <div className="text-[10px] font-bold text-[#6B665F] uppercase">Chắt ({stats.greatGrandchildren.total})</div>
+                                    <div className="flex gap-4 text-sm">
+                                      <div className="flex items-center gap-1.5">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                        <span className="font-bold text-[#2D2A26]">{stats.greatGrandchildren.sons} Chắt trai</span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-pink-500" />
+                                        <span className="font-bold text-[#2D2A26]">{stats.greatGrandchildren.daughters} Chắt gái</span>
+                                      </div>
+                                    </div>
                                   </div>
                                 )}
                               </div>

@@ -63,6 +63,18 @@ const FamilyTree: React.FC = () => {
     return m.name.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
+  useEffect(() => {
+    if (highlightId && !loading) {
+      const timer = setTimeout(() => {
+        const element = document.querySelector(`[data-member-id="${highlightId}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+        }
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightId, loading]);
+
   const generations = Array.from(new Set(members.map(m => m.generation))).sort((a, b) => a - b);
 
   // Recursive component for Tree View
@@ -75,12 +87,13 @@ const FamilyTree: React.FC = () => {
       <div className="flex flex-col items-center">
         <motion.div
           layoutId={member.id}
+          data-member-id={member.id}
           onClick={() => setSelectedMember(member)}
           whileHover={{ y: -4, scale: 1.02 }}
           className={cn(
             "relative z-10 bg-white p-4 rounded-xl border border-[#E5E1D8] shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-[#8B2323]/30 min-w-[160px] max-w-[200px]",
             member.gender === "Nam" ? "border-t-4 border-t-blue-400" : "border-t-4 border-t-pink-400",
-            isHighlighted && "ring-4 ring-[#8B2323] ring-offset-2 border-[#8B2323]"
+            isHighlighted && "ring-4 ring-[#8B2323] ring-offset-2 border-[#8B2323] shadow-lg shadow-[#8B2323]/20"
           )}
         >
           <div className="flex flex-col items-center gap-2">

@@ -560,14 +560,18 @@ const Admin: React.FC = () => {
                       </div>
                       <div>
                         <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Thế hệ</label>
-                        <input
+                        <select
                           required
-                          type="number"
-                          min="1"
                           value={formData.generation || 1}
                           onChange={(e) => setFormData({ ...formData, generation: Number(e.target.value) })}
                           className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        />
+                        >
+                          {[...Array(30)].map((_, i) => (
+                            <option key={i + 1} value={i + 1}>
+                              {i + 1}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <div>
                         <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Giới tính</label>
