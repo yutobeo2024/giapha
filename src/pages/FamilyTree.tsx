@@ -2,10 +2,13 @@ import React, { useState, useEffect } from "react";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { motion, AnimatePresence } from "framer-motion";
-import { Users, Search, Filter, ChevronRight, User as UserIcon, Info, X } from "lucide-react";
+import { Users, Search, Filter, ChevronRight, User as UserIcon, Info, X, ZoomIn, ZoomOut, Maximize, MousePointer2, FileDown } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { useSearchParams } from "react-router-dom";
+import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -33,11 +36,13 @@ interface FamilyMember {
 const FamilyTree: React.FC = () => {
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
   const [viewMode, setViewMode] = useState<"tree" | "grid">("tree");
   const [searchParams] = useSearchParams();
   const highlightId = searchParams.get("highlight");
+  const treeRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const q = query(collection(db, "members"), orderBy("generation", "asc"), orderBy("name", "asc"));
@@ -77,11 +82,75 @@ const FamilyTree: React.FC = () => {
 
   const generations = Array.from(new Set(members.map(m => m.generation))).sort((a, b) => a - b);
 
+  const exportToPDF = async () => {
+    if (!treeRef.current) return;
+    
+    setExporting(true);
+    try {
+      const element = treeRef.current;
+      
+      // Use html2canvas to capture the tree with higher resolution
+      const canvas = await html2canvas(element, {
+        scale: 4, // High scale for better resolution
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        backgroundColor: "#FDFCF9",
+        // Ensure we capture the full scrollable area
+        width: element.scrollWidth,
+        height: element.scrollHeight,
+        onclone: (clonedDoc) => {
+          // Ensure the cloned element is fully visible and not affected by any parent transforms
+          const clonedElement = clonedDoc.querySelector('.tree-export-container');
+          if (clonedElement instanceof HTMLElement) {
+            clonedElement.style.transform = "none";
+            clonedElement.style.position = "relative";
+            clonedElement.style.left = "0";
+            clonedElement.style.top = "0";
+          }
+        }
+      });
+      
+      const imgData = canvas.toDataURL("image/png", 1.0);
+      
+      // A3 Landscape dimensions in mm: 420 x 297
+      const pdf = new jsPDF({
+        orientation: "landscape",
+        unit: "mm",
+        format: "a3",
+        compress: true
+      });
+      
+      const pdfWidth = 420;
+      const pdfHeight = 297;
+      
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      
+      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+      const finalWidth = imgWidth * ratio;
+      const finalHeight = imgHeight * ratio;
+      
+      // Center the image in the PDF
+      const x = (pdfWidth - finalWidth) / 2;
+      const y = (pdfHeight - finalHeight) / 2;
+      
+      pdf.addImage(imgData, "PNG", x, y, finalWidth, finalHeight, undefined, "SLOW");
+      pdf.save("Gia-Pha-Ho-Nguyen-Nhuan.pdf");
+    } catch (error) {
+      console.error("Export PDF failed:", error);
+      alert("Có lỗi xảy ra khi xuất PDF. Vui lòng thử lại.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // Recursive component for Tree View
   const MemberNode = ({ member, level = 0 }: { member: FamilyMember; level: number }) => {
     const children = members.filter(m => m.fatherId === member.id || m.motherId === member.id);
     const hasChildren = children.length > 0;
     const isHighlighted = member.id === highlightId;
+    const isSearchMatch = searchTerm && member.name.toLowerCase().includes(searchTerm.toLowerCase());
 
     return (
       <div className="flex flex-col items-center">
@@ -89,56 +158,55 @@ const FamilyTree: React.FC = () => {
           layoutId={member.id}
           data-member-id={member.id}
           onClick={() => setSelectedMember(member)}
-          whileHover={{ y: -4, scale: 1.02 }}
+          whileHover={{ y: -2, scale: 1.02 }}
           className={cn(
-            "relative z-10 bg-white p-4 rounded-xl border border-[#E5E1D8] shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-[#8B2323]/30 min-w-[160px] max-w-[200px]",
-            member.gender === "Nam" ? "border-t-4 border-t-blue-400" : "border-t-4 border-t-pink-400",
-            isHighlighted && "ring-4 ring-[#8B2323] ring-offset-2 border-[#8B2323] shadow-lg shadow-[#8B2323]/20"
+            "relative z-10 bg-white p-2.5 rounded-lg border border-[#E5E1D8] shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-[#8B2323]/30 w-[140px]",
+            member.gender === "Nam" ? "border-t-2 border-t-blue-400" : "border-t-2 border-t-pink-400",
+            isHighlighted && "ring-2 ring-[#8B2323] ring-offset-1 border-[#8B2323] shadow-lg shadow-[#8B2323]/20",
+            isSearchMatch && "ring-2 ring-emerald-500 ring-offset-1 border-emerald-500 shadow-lg shadow-emerald-500/20"
           )}
         >
-          <div className="flex flex-col items-center gap-2">
+          <div className="flex flex-col items-center gap-1.5">
             <div className="relative">
               <img
                 src={member.photoUrl || `https://ui-avatars.com/api/?name=${member.name}&background=${member.gender === "Nam" ? "EBF5FF" : "FFF5F7"}&color=${member.gender === "Nam" ? "2563EB" : "DB2777"}`}
                 alt={member.name}
-                className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm"
+                className="w-10 h-10 rounded-full object-cover border border-white shadow-sm"
               />
               {member.status === "Deceased" && (
-                <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-gray-800 rounded-full flex items-center justify-center border-2 border-white">
-                  <div className="w-1.5 h-1.5 bg-white/50 rounded-full" />
+                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-gray-800 rounded-full flex items-center justify-center border border-white">
+                  <div className="w-1 h-1 bg-white/50 rounded-full" />
                 </div>
               )}
             </div>
             <div className="text-center overflow-hidden w-full">
-              <h4 className="font-bold text-[#2D2A26] text-sm truncate">{member.name}</h4>
-              <p className="text-[10px] text-[#A19D96] mt-0.5">Thế hệ {member.generation}</p>
+              <h4 className="font-bold text-[#2D2A26] text-[11px] leading-tight truncate">{member.name}</h4>
+              <p className="text-[9px] text-[#A19D96] mt-0.5">Thế hệ {member.generation}</p>
             </div>
           </div>
         </motion.div>
 
         {hasChildren && (
-          <div className="relative pt-8 flex flex-col items-center">
+          <div className="relative pt-6 flex flex-col items-center">
             {/* Vertical line from parent to horizontal line */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-[#D1CDC2]" />
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1.5px] h-6 bg-[#D1CDC2]" />
             
-            <div className="flex gap-8 relative">
+            <div className="flex gap-10 relative">
               {children.map((child, index) => (
-                <div key={child.id} className="relative pt-8 flex-1 min-w-[220px]">
-                  {/* Horizontal line segments - Connects to siblings without overhang and bridges gaps */}
+                <div key={child.id} className="relative pt-6 flex-1">
+                  {/* Horizontal line segments */}
                   {children.length > 1 && (
                     <div 
                       className={cn(
-                        "absolute top-0 h-[2px] bg-[#D1CDC2]",
-                        index === 0 ? "left-1/2 -right-4" : 
-                        index === children.length - 1 ? "-left-4 right-1/2" : 
-                        "-left-4 -right-4"
+                        "absolute top-0 h-[1.5px] bg-[#D1CDC2]",
+                        index === 0 ? "left-1/2 -right-5" : 
+                        index === children.length - 1 ? "-left-5 right-1/2" : 
+                        "-left-5 -right-5"
                       )}
                     />
                   )}
                   {/* Vertical line from horizontal line to child */}
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-[#D1CDC2]" />
-                  {/* Arrow head pointing to child - positioned near the card */}
-                  <div className="absolute top-[26px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[7px] border-t-[#D1CDC2]" />
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1.5px] h-6 bg-[#D1CDC2]" />
                   <MemberNode member={child} level={level + 1} />
                 </div>
               ))}
@@ -158,6 +226,20 @@ const FamilyTree: React.FC = () => {
           <p className="text-[#6B665F]">Khám phá các thế hệ trong dòng họ Nguyễn Nhuận.</p>
         </div>
         <div className="flex flex-wrap items-center gap-4">
+          {viewMode === "tree" && (
+            <button
+              onClick={exportToPDF}
+              disabled={exporting}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-full text-sm font-medium hover:bg-emerald-700 transition-all shadow-md disabled:opacity-50"
+            >
+              {exporting ? (
+                <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+              ) : (
+                <FileDown className="w-4 h-4" />
+              )}
+              Xuất PDF (A3)
+            </button>
+          )}
           <div className="flex bg-white border border-[#E5E1D8] rounded-full p-1">
             <button
               onClick={() => setViewMode("tree")}
@@ -187,34 +269,109 @@ const FamilyTree: React.FC = () => {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 pr-4 py-2 bg-white border border-[#E5E1D8] rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20 w-full md:w-64"
             />
+            {searchTerm && filteredMembers.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-[#E5E1D8] rounded-2xl shadow-xl z-[100] max-h-64 overflow-y-auto p-2">
+                {filteredMembers.map(m => (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      setSelectedMember(m);
+                      setSearchTerm("");
+                      // Scroll to member in tree
+                      const element = document.querySelector(`[data-member-id="${m.id}"]`);
+                      if (element) {
+                        element.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+                      }
+                    }}
+                    className="w-full flex items-center gap-3 p-2 hover:bg-gray-50 rounded-xl transition-colors text-left"
+                  >
+                    <img
+                      src={m.photoUrl || `https://ui-avatars.com/api/?name=${m.name}`}
+                      className="w-8 h-8 rounded-full border border-gray-100"
+                    />
+                    <div>
+                      <div className="text-sm font-bold text-[#2D2A26]">{m.name}</div>
+                      <div className="text-[10px] text-[#A19D96]">Thế hệ {m.generation}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Tree View */}
-      <div className="bg-white rounded-3xl border border-[#E5E1D8] p-8 overflow-x-auto min-h-[600px] shadow-sm">
+      {/* Tree View Container */}
+      <div className="bg-[#FDFCF9] rounded-3xl border border-[#E5E1D8] overflow-hidden min-h-[700px] shadow-inner relative group">
         {loading ? (
-          <div className="flex items-center justify-center h-64">
+          <div className="flex items-center justify-center h-[700px]">
             <div className="w-12 h-12 border-4 border-[#8B2323]/20 border-t-[#8B2323] rounded-full animate-spin" />
           </div>
         ) : viewMode === "tree" ? (
-          <div className="inline-block min-w-full text-center">
-            <div className="flex flex-col items-center gap-12">
-              {members.filter(m => !m.fatherId && !m.motherId && m.generation === 1).map(ancestor => (
-                <div key={ancestor.id} className="mb-12 last:mb-0">
-                  <MemberNode member={ancestor} level={0} />
+          <TransformWrapper
+            initialScale={0.8}
+            minScale={0.2}
+            maxScale={2}
+            centerOnInit
+            limitToBounds={false}
+          >
+            {({ zoomIn, zoomOut, resetTransform }) => (
+              <>
+                {/* Zoom Controls */}
+                <div className="absolute bottom-6 right-6 z-50 flex flex-col gap-2">
+                  <button
+                    onClick={() => zoomIn()}
+                    className="p-3 bg-white border border-[#E5E1D8] rounded-xl shadow-lg hover:bg-gray-50 text-[#8B2323] transition-all active:scale-95"
+                    title="Phóng to"
+                  >
+                    <ZoomIn className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => zoomOut()}
+                    className="p-3 bg-white border border-[#E5E1D8] rounded-xl shadow-lg hover:bg-gray-50 text-[#8B2323] transition-all active:scale-95"
+                    title="Thu nhỏ"
+                  >
+                    <ZoomOut className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => resetTransform()}
+                    className="p-3 bg-white border border-[#E5E1D8] rounded-xl shadow-lg hover:bg-gray-50 text-[#8B2323] transition-all active:scale-95"
+                    title="Về mặc định"
+                  >
+                    <Maximize className="w-5 h-5" />
+                  </button>
                 </div>
-              ))}
-              {members.filter(m => !m.fatherId && !m.motherId && m.generation === 1).length === 0 && (
-                <div className="text-center py-20">
-                  <Users className="w-16 h-16 mx-auto mb-4 text-[#A19D96] opacity-20" />
-                  <p className="text-[#A19D96]">Vui lòng thiết lập cha/mẹ cho các thành viên để hiển thị sơ đồ cây.</p>
+
+                {/* Helper Tooltip */}
+                <div className="absolute top-6 left-6 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="bg-black/60 backdrop-blur-md text-white px-4 py-2 rounded-full text-xs flex items-center gap-2">
+                    <MousePointer2 className="w-3 h-3" />
+                    Giữ chuột trái để kéo • Cuộn chuột để thu phóng
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
+
+                <TransformComponent wrapperClass="!w-full !h-[700px]" contentClass="!w-full !h-full flex items-center justify-center">
+                  <div ref={treeRef} className="p-20 inline-block bg-[#FDFCF9] tree-export-container">
+                    <div className="flex flex-col items-center gap-16">
+                      {members.filter(m => !m.fatherId && !m.motherId && m.generation === 1).map(ancestor => (
+                        <div key={ancestor.id} className="mb-16 last:mb-0">
+                          <MemberNode member={ancestor} level={0} />
+                        </div>
+                      ))}
+                      {members.filter(m => !m.fatherId && !m.motherId && m.generation === 1).length === 0 && (
+                        <div className="text-center py-20">
+                          <Users className="w-16 h-16 mx-auto mb-4 text-[#A19D96] opacity-20" />
+                          <p className="text-[#A19D96]">Vui lòng thiết lập cha/mẹ cho các thành viên để hiển thị sơ đồ cây.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </TransformComponent>
+              </>
+            )}
+          </TransformWrapper>
         ) : (
-          <div className="space-y-12">
+          <div className="p-8 space-y-12 overflow-y-auto max-h-[700px]">
             {generations.map((gen) => (
               <div key={gen} className="space-y-6">
                 <div className="flex items-center gap-4">
