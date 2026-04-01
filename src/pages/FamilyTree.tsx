@@ -91,26 +91,26 @@ const FamilyTree: React.FC = () => {
         {hasChildren && (
           <div className="relative pt-8 flex flex-col items-center">
             {/* Vertical line from parent to horizontal line */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-px h-8 bg-[#E5E1D8]" />
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-[#D1CDC2]" />
             
             <div className="flex gap-8 relative">
               {children.map((child, index) => (
-                <div key={child.id} className="relative pt-8">
-                  {/* Horizontal line segments - Connects to siblings without overhang */}
+                <div key={child.id} className="relative pt-8 flex-1 min-w-[220px]">
+                  {/* Horizontal line segments - Connects to siblings without overhang and bridges gaps */}
                   {children.length > 1 && (
                     <div 
                       className={cn(
-                        "absolute top-0 h-px bg-[#E5E1D8]",
-                        index === 0 ? "left-1/2 right-0" : 
-                        index === children.length - 1 ? "left-0 right-1/2" : 
-                        "left-0 right-0"
+                        "absolute top-0 h-[2px] bg-[#D1CDC2]",
+                        index === 0 ? "left-1/2 -right-4" : 
+                        index === children.length - 1 ? "-left-4 right-1/2" : 
+                        "-left-4 -right-4"
                       )}
                     />
                   )}
                   {/* Vertical line from horizontal line to child */}
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-px h-8 bg-[#E5E1D8]" />
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[2px] h-8 bg-[#D1CDC2]" />
                   {/* Arrow head pointing to child - positioned near the card */}
-                  <div className="absolute top-[26px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[6px] border-t-[#E5E1D8]" />
+                  <div className="absolute top-[26px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[7px] border-t-[#D1CDC2]" />
                   <MemberNode member={child} level={level + 1} />
                 </div>
               ))}
