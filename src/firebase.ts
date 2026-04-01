@@ -1,11 +1,34 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer, collection, onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, query, where, orderBy, limit } from 'firebase/firestore';
+import { 
+  initializeFirestore, 
+  doc, 
+  getDocFromServer, 
+  collection, 
+  onSnapshot, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  addDoc, 
+  query, 
+  where, 
+  orderBy, 
+  limit,
+  terminate,
+  clearIndexedDbPersistence,
+  memoryLocalCache
+} from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase SDK
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Initialize Firestore with settings to avoid common transaction issues in some environments
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true, // Can help with some network/proxy issues
+  localCache: memoryLocalCache(), // Explicitly use memory cache to avoid IndexedDB issues in iframes
+}, firebaseConfig.firestoreDatabaseId);
+
 export const auth = getAuth(app);
 
 export enum OperationType {
@@ -37,8 +60,16 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  
+  // Handle "The transaction was aborted" error which is often a persistence issue
+  if (errorMessage.includes('The transaction was aborted')) {
+    console.warn('Firestore transaction aborted. Attempting to clear persistence...');
+    terminate(db).then(() => clearIndexedDbPersistence(db)).catch(console.error);
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,

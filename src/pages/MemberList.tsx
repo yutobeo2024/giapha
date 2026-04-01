@@ -18,6 +18,8 @@ import {
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
 
+import { useNavigate } from "react-router-dom";
+
 interface Member {
   id: string;
   name: string;
@@ -29,6 +31,7 @@ interface Member {
   fatherId?: string;
   motherId?: string;
   spouseId?: string;
+  spouse?: string;
   bio?: string;
   gender: "Nam" | "Nữ";
   isDirectDescendant: boolean;
@@ -42,6 +45,39 @@ const MemberList: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedGeneration, setSelectedGeneration] = useState<number | "all">("all");
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const navigate = useNavigate();
+
+  const getDescendantStats = (memberId: string) => {
+    const children = members.filter(m => m.fatherId === memberId || m.motherId === memberId);
+    const grandchildren = members.filter(m => {
+      const parent = members.find(p => p.id === m.fatherId || p.id === m.motherId);
+      return parent && (parent.fatherId === memberId || parent.motherId === memberId);
+    });
+    const greatGrandchildren = members.filter(m => {
+      const parent = members.find(p => p.id === m.fatherId || p.id === m.motherId);
+      if (!parent) return false;
+      const grandparent = members.find(gp => gp.id === parent.fatherId || gp.id === parent.motherId);
+      return grandparent && (grandparent.fatherId === memberId || grandparent.motherId === memberId);
+    });
+
+    return {
+      children: {
+        total: children.length,
+        sons: children.filter(c => c.gender === "Nam").length,
+        daughters: children.filter(c => c.gender === "Nữ").length
+      },
+      grandchildren: {
+        total: grandchildren.length,
+        sons: grandchildren.filter(c => c.gender === "Nam").length,
+        daughters: grandchildren.filter(c => c.gender === "Nữ").length
+      },
+      greatGrandchildren: {
+        total: greatGrandchildren.length,
+        sons: greatGrandchildren.filter(c => c.gender === "Nam").length,
+        daughters: greatGrandchildren.filter(c => c.gender === "Nữ").length
+      }
+    };
+  };
 
   useEffect(() => {
     const q = query(collection(db, "members"), orderBy("generation", "asc"), orderBy("name", "asc"));
@@ -273,32 +309,78 @@ const MemberList: React.FC = () => {
                     <div className="space-y-4">
                       <h4 className="text-[10px] font-bold uppercase tracking-widest text-[#8B2323]">Quan hệ gia đình</h4>
                       <div className="grid gap-3">
-                        <div className="flex items-center justify-between p-4 bg-white border border-[#E5E1D8] rounded-2xl">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-xl bg-red-50 flex items-center justify-center text-[#8B2323] font-bold text-xs">P</div>
-                            <div>
-                              <div className="text-[9px] font-bold uppercase text-[#A19D96]">Phối ngẫu</div>
-                              <div className="text-sm font-bold text-[#2D2A26]">Trần Thị Hiền</div>
+                        {selectedMember.spouse ? (
+                          <div className="flex items-center justify-between p-4 bg-white border border-[#E5E1D8] rounded-2xl">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-xl bg-red-50 flex items-center justify-center text-[#8B2323] font-bold text-xs">P</div>
+                              <div>
+                                <div className="text-[9px] font-bold uppercase text-[#A19D96]">Phối ngẫu</div>
+                                <div className="text-sm font-bold text-[#2D2A26]">{selectedMember.spouse}</div>
+                              </div>
                             </div>
                           </div>
-                          <ArrowRight className="w-4 h-4 text-[#A19D96]" />
-                        </div>
-                        <div className="flex items-center justify-between p-4 bg-white border border-[#E5E1D8] rounded-2xl">
+                        ) : (
+                          <div className="flex items-center justify-between p-4 bg-white border border-[#E5E1D8] rounded-2xl opacity-50 italic">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 font-bold text-xs">P</div>
+                              <div className="text-sm font-medium text-gray-400">Chưa cập nhật phối ngẫu</div>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Descendants Stats */}
+                        <div className="p-5 bg-white border border-[#E5E1D8] rounded-2xl space-y-4">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs">H</div>
-                            <div>
-                              <div className="text-[9px] font-bold uppercase text-[#A19D96]">Hậu duệ</div>
-                              <div className="text-sm font-bold text-[#2D2A26]">5 Người con (3 Trai, 2 Gái)</div>
-                            </div>
+                            <div className="text-[10px] font-bold uppercase text-[#A19D96]">Thống kê Hậu duệ</div>
                           </div>
-                          <ArrowRight className="w-4 h-4 text-[#A19D96]" />
+                          
+                          {(() => {
+                            const stats = getDescendantStats(selectedMember.id);
+                            const hasAny = stats.children.total > 0 || stats.grandchildren.total > 0 || stats.greatGrandchildren.total > 0;
+                            
+                            if (!hasAny) return <p className="text-xs italic text-[#A19D96]">Chưa có thông tin hậu duệ</p>;
+                            
+                            return (
+                              <div className="grid grid-cols-1 gap-3">
+                                {stats.children.total > 0 && (
+                                  <div className="flex items-center justify-between text-sm">
+                                    <span className="text-[#6B665F]">Con cái:</span>
+                                    <span className="font-bold text-[#2D2A26]">
+                                      {stats.children.sons} Trai, {stats.children.daughters} Gái
+                                    </span>
+                                  </div>
+                                )}
+                                {stats.grandchildren.total > 0 && (
+                                  <div className="flex items-center justify-between text-sm">
+                                    <span className="text-[#6B665F]">Cháu:</span>
+                                    <span className="font-bold text-[#2D2A26]">
+                                      {stats.grandchildren.sons} Trai, {stats.grandchildren.daughters} Gái
+                                    </span>
+                                  </div>
+                                )}
+                                {stats.greatGrandchildren.total > 0 && (
+                                  <div className="flex items-center justify-between text-sm">
+                                    <span className="text-[#6B665F]">Chắt:</span>
+                                    <span className="font-bold text-[#2D2A26]">
+                                      {stats.greatGrandchildren.sons} Trai, {stats.greatGrandchildren.daughters} Gái
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+
+                          <button 
+                            onClick={() => navigate(`/tree?highlight=${selectedMember.id}`)}
+                            className="w-full mt-2 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl text-[10px] font-bold text-[#8B2323] uppercase tracking-widest hover:bg-white transition-all flex items-center justify-center gap-2 group"
+                          >
+                            Xem trong sơ đồ gia hệ
+                            <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+                          </button>
                         </div>
                       </div>
                     </div>
-
-                    <button className="w-full py-4 bg-[#8B2323] text-white rounded-2xl font-bold text-sm shadow-xl shadow-[#8B2323]/20 hover:bg-[#6B1B1B] transition-all">
-                      Xem Sơ Đồ Gia Hệ
-                    </button>
                   </div>
                 </motion.div>
               ) : (

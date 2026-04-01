@@ -4,6 +4,54 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>
+    <script>
+      // Aggressive fix for "Cannot set property fetch of #<Window> which has only a getter"
+      (function() {
+        try {
+          const defineFetch = (obj) => {
+            if (obj && !Object.getOwnPropertyDescriptor(obj, 'fetch')?.writable) {
+              const originalFetch = obj.fetch;
+              Object.defineProperty(obj, 'fetch', {
+                value: originalFetch,
+                writable: true,
+                configurable: true,
+                enumerable: true
+              });
+            }
+          };
+          defineFetch(window);
+          defineFetch(Window.prototype);
+        } catch (e) {
+          // Ignore errors
+        }
+      })();
+
+      // Fix for "Internal error opening backing store for indexedDB.open"
+      // This can happen in some iframe/private browsing environments
+      (function() {
+        const originalOpen = window.indexedDB?.open;
+        if (originalOpen) {
+          window.indexedDB.open = function() {
+            try {
+              return originalOpen.apply(this, arguments);
+            } catch (e) {
+              console.warn('IndexedDB open failed, likely blocked in this environment:', e);
+              // Return a dummy request object that will fail gracefully
+              return {
+                addEventListener: () => {},
+                removeEventListener: () => {},
+                onerror: null,
+                onsuccess: null,
+                onupgradeneeded: null,
+                onblocked: null,
+                readyState: 'done',
+                error: e
+              };
+            }
+          };
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

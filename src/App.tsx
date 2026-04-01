@@ -12,6 +12,7 @@ import MemberList from "./pages/MemberList";
 import FamilyTree from "./pages/FamilyTree";
 import Events from "./pages/Events";
 import Admin from "./pages/Admin";
+import Biography from "./pages/Biography";
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/tree" element={<FamilyTree />} />
             <Route path="/events" element={<Events />} />
             <Route path="/admin" element={<Admin />} />
+            <Route path="/biography" element={<Biography />} />
           </Routes>
         </Layout>
       </Router>

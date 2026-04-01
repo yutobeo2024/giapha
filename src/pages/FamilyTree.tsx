@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Users, Search, Filter, ChevronRight, User as UserIcon, Info, X } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { useSearchParams } from "react-router-dom";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -23,6 +24,8 @@ interface FamilyMember {
   fatherId?: string;
   motherId?: string;
   spouseId?: string;
+  spouse?: string;
+  address?: string;
   photoUrl?: string;
   status?: "Alive" | "Deceased";
 }
@@ -33,18 +36,28 @@ const FamilyTree: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
   const [viewMode, setViewMode] = useState<"tree" | "grid">("tree");
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get("highlight");
 
   useEffect(() => {
     const q = query(collection(db, "members"), orderBy("generation", "asc"), orderBy("name", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FamilyMember));
       setMembers(data);
+      
+      if (highlightId && data.length > 0) {
+        const highlighted = data.find(m => m.id === highlightId);
+        if (highlighted) {
+          setSelectedMember(highlighted);
+        }
+      }
+      
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, "members");
     });
     return () => unsubscribe();
-  }, []);
+  }, [highlightId]);
 
   const filteredMembers = members.filter(m => {
     return m.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -56,6 +69,7 @@ const FamilyTree: React.FC = () => {
   const MemberNode = ({ member, level = 0 }: { member: FamilyMember; level: number }) => {
     const children = members.filter(m => m.fatherId === member.id || m.motherId === member.id);
     const hasChildren = children.length > 0;
+    const isHighlighted = member.id === highlightId;
 
     return (
       <div className="flex flex-col items-center">
@@ -65,7 +79,8 @@ const FamilyTree: React.FC = () => {
           whileHover={{ y: -4, scale: 1.02 }}
           className={cn(
             "relative z-10 bg-white p-4 rounded-xl border border-[#E5E1D8] shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-[#8B2323]/30 min-w-[160px] max-w-[200px]",
-            member.gender === "Nam" ? "border-t-4 border-t-blue-400" : "border-t-4 border-t-pink-400"
+            member.gender === "Nam" ? "border-t-4 border-t-blue-400" : "border-t-4 border-t-pink-400",
+            isHighlighted && "ring-4 ring-[#8B2323] ring-offset-2 border-[#8B2323]"
           )}
         >
           <div className="flex flex-col items-center gap-2">
@@ -278,6 +293,10 @@ const FamilyTree: React.FC = () => {
                     <div className="p-4 bg-[#FDFCF9] rounded-2xl border border-[#E5E1D8]">
                       <div className="text-xs text-[#A19D96] uppercase font-bold mb-1">Ngày mất</div>
                       <div className="font-medium">{selectedMember.deathDate || "---"}</div>
+                    </div>
+                    <div className="p-4 bg-[#FDFCF9] rounded-2xl border border-[#E5E1D8] col-span-2">
+                      <div className="text-xs text-[#A19D96] uppercase font-bold mb-1">Nơi sống</div>
+                      <div className="font-medium">{selectedMember.address || "Chưa cập nhật"}</div>
                     </div>
                   </div>
 

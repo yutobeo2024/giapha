@@ -107,15 +107,20 @@ const Dashboard: React.FC = () => {
         
         <div className="relative z-10 max-w-3xl">
           <span className="inline-block px-4 py-1 bg-[#8B2323] text-white text-[10px] font-bold uppercase tracking-[0.2em] rounded-full mb-6">
-            Khai Sáng Tổ Tiên
+            Lịch Sử & Truyền Thống
           </span>
           <h2 className="font-serif text-5xl md:text-6xl font-black text-[#2D2A26] leading-[1.1] mb-6">
-            Gia Phả Họ Nguyễn Nhuận <br />
-            <span className="text-[#8B2323] italic">Hưng Long - Thái Bình</span>
+            Hành Trình Phát Triển <br />
+            <span className="text-[#8B2323] italic">Chi Họ Nguyễn Nhuận</span>
           </h2>
-          <p className="text-[#6B665F] text-lg leading-relaxed max-w-xl italic font-serif">
-            "Cây có cội mới nảy cành xanh lá, nước có nguồn mới bể rộng sông sâu." Nơi lưu giữ tâm hồn, huyết thống và những giá trị văn hóa truyền đời của dòng tộc Nguyễn Nhuận.
-          </p>
+          <div className="space-y-4 text-[#6B665F] text-lg leading-relaxed max-w-2xl italic font-serif">
+            <p>
+              "Cây có cội mới nảy cành xanh lá, nước có nguồn mới bể rộng sông sâu." Chi họ Nguyễn Nhuận trải qua quá trình hình thành và phát triển lâu đời, gắn liền với sự sinh sôi và thành đạt của các thế hệ hậu duệ.
+            </p>
+            <p className="text-base not-italic font-sans text-[#A19D96]">
+              Dòng họ luôn chú trọng việc bảo tồn giá trị truyền thống, tôn tạo lăng mộ và nhà thờ tổ tiên trang nghiêm. Đây là nền tảng vững chắc để con cháu luôn nhớ về cội nguồn, nỗ lực học tập và rèn luyện bản thân để xứng đáng với công lao của các bậc tiền nhân.
+            </p>
+          </div>
         </div>
 
         <div className="absolute bottom-12 right-12 hidden lg:block">
@@ -125,7 +130,7 @@ const Dashboard: React.FC = () => {
              </div>
              <div className="text-center">
                <div className="text-[10px] font-bold uppercase tracking-widest text-[#A19D96]">Dòng Tộc</div>
-               <div className="font-serif font-bold text-[#2D2A26]">TRIỆU VÀNG</div>
+               <div className="font-serif font-bold text-[#2D2A26]">NGUYỄN NHUẬN</div>
              </div>
           </div>
         </div>
@@ -250,11 +255,14 @@ const Dashboard: React.FC = () => {
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#A19D96] mt-1">Thế Hệ Thứ Nhất</p>
               </div>
               <p className="text-sm text-[#6B665F] leading-relaxed italic">
-                "Người có công khai khẩn đất hoang, lập nên cơ đồ cho con cháu muôn đời sau. Đức độ sáng ngời như vầng nhật nguyệt."
+                "Thế hệ trẻ hãy luôn nhớ về cội nguồn, trân trọng và tôn kính tổ tiên. Sự đoàn kết, yêu thương và tinh thần tương trợ lẫn nhau là nền tảng vững chắc để vươn lên, xây dựng cộng đồng ngày càng vững mạnh."
               </p>
-              <button className="text-xs font-bold text-[#2D2A26] border-b-2 border-[#8B2323] pb-1 hover:text-[#8B2323] transition-colors">
+              <Link 
+                to="/biography" 
+                className="text-xs font-bold text-[#2D2A26] border-b-2 border-[#8B2323] pb-1 hover:text-[#8B2323] transition-colors inline-block"
+              >
                 Đọc thêm tiểu sử
-              </button>
+              </Link>
             </div>
           </section>
         </div>

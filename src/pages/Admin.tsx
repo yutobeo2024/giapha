@@ -20,6 +20,8 @@ interface FamilyMember {
   motherId?: string;
   photoUrl?: string;
   status?: "Alive" | "Deceased";
+  address?: string;
+  spouse?: string;
 }
 
 interface FamilyEvent {
@@ -598,6 +600,26 @@ const Admin: React.FC = () => {
                           <option value="Alive">Còn sống</option>
                           <option value="Deceased">Đã mất</option>
                         </select>
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Nơi sống</label>
+                        <input
+                          type="text"
+                          placeholder="VD: Hà Nội, Việt Nam"
+                          value={formData.address || ""}
+                          onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Người Phối Ngẫu (cách nhau bởi dấu phẩy)</label>
+                        <input
+                          type="text"
+                          placeholder="VD: Nguyễn Thị A, Trần Thị B"
+                          value={formData.spouse || ""}
+                          onChange={(e) => setFormData({ ...formData, spouse: e.target.value })}
+                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
+                        />
                       </div>
                       <div className="md:col-span-2">
                         <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Tiểu sử</label>
