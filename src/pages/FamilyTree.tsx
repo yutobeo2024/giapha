@@ -89,11 +89,11 @@ const FamilyTree: React.FC = () => {
     try {
       const element = treeRef.current;
       
-      // Use html2canvas to capture the tree with higher resolution
+      // Use html2canvas to capture the tree with a balanced resolution
+      // Scale 2.5 is a good compromise between clarity and memory usage
       const canvas = await html2canvas(element, {
-        scale: 4, // High scale for better resolution
+        scale: 2.5, 
         useCORS: true,
-        allowTaint: true,
         logging: false,
         backgroundColor: "#FDFCF9",
         // Ensure we capture the full scrollable area
@@ -107,11 +107,15 @@ const FamilyTree: React.FC = () => {
             clonedElement.style.position = "relative";
             clonedElement.style.left = "0";
             clonedElement.style.top = "0";
+            // Ensure all children are visible
+            clonedElement.style.visibility = "visible";
+            clonedElement.style.display = "inline-block";
           }
         }
       });
       
-      const imgData = canvas.toDataURL("image/png", 1.0);
+      // Use JPEG with 0.95 quality to reduce memory compared to PNG
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
       
       // A3 Landscape dimensions in mm: 420 x 297
       const pdf = new jsPDF({
@@ -135,7 +139,8 @@ const FamilyTree: React.FC = () => {
       const x = (pdfWidth - finalWidth) / 2;
       const y = (pdfHeight - finalHeight) / 2;
       
-      pdf.addImage(imgData, "PNG", x, y, finalWidth, finalHeight, undefined, "SLOW");
+      // Use JPEG for PDF to keep file size manageable
+      pdf.addImage(imgData, "JPEG", x, y, finalWidth, finalHeight, undefined, "FAST");
       pdf.save("Gia-Pha-Ho-Nguyen-Nhuan.pdf");
     } catch (error) {
       console.error("Export PDF failed:", error);
