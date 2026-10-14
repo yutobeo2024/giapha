@@ -189,7 +189,9 @@ const Admin: React.FC = () => {
 
     const col = activeTab === "members" ? "members" : "events";
     const label = activeTab === "members" ? `thành viên: ${formData.name}` : `sự kiện: ${formData.title}`;
-    const payload = clean(formData);
+    // Không ghi trường id vào document (id đã là document id); loại bỏ key rỗng/undefined
+    const { id: _ignored, ...rest } = formData as FormState & { id?: string };
+    const payload = clean(rest);
 
     try {
       if (editingItem) {
