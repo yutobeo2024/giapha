@@ -1,0 +1,23 @@
+# Worker sao lưu Firestore hằng đêm vào R2 (gói Cloudflare Free: 5 cron trigger miễn phí).
+# Deploy riêng, độc lập với site:  npx wrangler deploy --config backup-worker/wrangler.toml
+name = "giapha-backup"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+workers_dev = false
+
+# 02:00 giờ Việt Nam = 19:00 UTC hôm trước
+[triggers]
+crons = ["0 19 * * *"]
+
+[vars]
+FIREBASE_PROJECT_ID = "gen-lang-client-0885231263"
+FIRESTORE_DATABASE_ID = "ai-studio-5efe7ae5-0c26-4948-aa25-806eda41487f"
+COLLECTIONS = "members,events,activities"
+DAILY_KEEP_DAYS = "60"
+
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "giapha-backups"
+
+[observability]
+enabled = true
