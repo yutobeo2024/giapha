@@ -2,11 +2,13 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { initializeFirestore, memoryLocalCache } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+import { CANONICAL_AUTH_DOMAIN } from './config';
 
 /**
- * Khi chạy trên domain thật (Cloudflare Pages), dùng chính domain đó làm authDomain.
- * Pages Function tại functions/__/auth/[[path]].ts sẽ proxy sang firebaseapp.com,
- * nhờ vậy popup đăng nhập Google không phụ thuộc cookie bên thứ ba.
+ * Trên môi trường thật, luôn dùng CANONICAL_AUTH_DOMAIN làm authDomain
+ * (Pages Function functions/__/auth/[[path]].ts proxy sang firebaseapp.com).
+ * Dùng một domain cố định thay vì window.location.hostname để www.*, *.pages.dev
+ * và địa chỉ xem trước không bị lỗi redirect_uri_mismatch.
  * Khi chạy localhost (vite dev) vẫn dùng authDomain gốc của Firebase.
  */
 const isLocalhost =
@@ -15,7 +17,7 @@ const isLocalhost =
 
 const app = initializeApp({
   ...firebaseConfig,
-  authDomain: isLocalhost ? firebaseConfig.authDomain : window.location.hostname,
+  authDomain: isLocalhost ? firebaseConfig.authDomain : CANONICAL_AUTH_DOMAIN,
 });
 
 export const db = initializeFirestore(
