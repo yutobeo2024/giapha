@@ -9,6 +9,7 @@ import {
   query,
   orderBy,
   writeBatch,
+  setDoc,
 } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { motion, AnimatePresence } from "framer-motion";
@@ -30,15 +31,20 @@ import {
   Download,
   UserCheck,
   Clock,
+  Settings,
+  Music2,
+  Upload,
+  Sparkles,
+  type LucideIcon,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useAuthContext } from "../hooks/AuthContext";
-import { uploadPhoto } from "../lib/image";
+import { uploadPhoto, uploadMedia } from "../lib/image";
 import { avatarUrl } from "../lib/avatar";
 import { SEED_MEMBERS } from "../data/seedMembers";
 import { ROLE_LABEL, STATUS_LABEL, type FamilyMember, type FamilyEvent, type UserDoc, type UserRole } from "../types";
 
-type Tab = "members" | "events" | "users";
+type Tab = "members" | "events" | "users" | "settings";
 type FormState = Partial<Omit<FamilyMember, "id">> & Partial<Omit<FamilyEvent, "id">>;
 type Message = { type: "success" | "error"; text: string };
 
@@ -97,10 +103,22 @@ const Admin: React.FC = () => {
     return () => unsubUsers();
   }, [user, isAdmin]);
 
-  // Editor không có tab users: nếu đang ở tab đó thì quay về members
+  // Editor không có tab users/settings: nếu đang ở tab đó thì quay về members
   useEffect(() => {
-    if (activeTab === "users" && !isAdmin) setActiveTab("members");
+    if ((activeTab === "users" || activeTab === "settings") && !isAdmin) setActiveTab("members");
   }, [activeTab, isAdmin]);
+
+  // Cài đặt site (nhạc nền trang Giới thiệu 3D)
+  const [siteSettings, setSiteSettings] = useState<{ introMusicUrl?: string; introMusicName?: string }>({});
+  const [musicUploading, setMusicUploading] = useState(false);
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+    return onSnapshot(
+      doc(db, "settings", "site"),
+      (snap) => setSiteSettings((snap.data() as typeof siteSettings) || {}),
+      (err) => setMessage({ type: "error", text: handleFirestoreError(err, OperationType.GET, "settings") })
+    );
+  }, [user, isAdmin]);
 
   const pendingCount = useMemo(() => users.filter((u) => u.role === "user").length, [users]);
   const visibleUsers = useMemo(() => {
@@ -295,11 +313,43 @@ const Admin: React.FC = () => {
   };
 
   // ---------- Render ----------
-  const tabs: { key: Tab; label: string; icon: React.ElementType; count: number; adminOnly?: boolean }[] = [
+  const tabs: { key: Tab; label: string; icon: LucideIcon; count?: number; adminOnly?: boolean }[] = [
     { key: "members", label: "Thành viên", icon: Users, count: members.length },
     { key: "events", label: "Sự kiện", icon: Calendar, count: events.length },
     { key: "users", label: "Người dùng", icon: Shield, count: users.length, adminOnly: true },
+    { key: "settings", label: "Cài đặt", icon: Settings, adminOnly: true },
   ];
+
+  const handleMusicChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setMusicUploading(true);
+    setMessage(null);
+    try {
+      const res = await uploadMedia(file, user);
+      await setDoc(doc(db, "settings", "site"), { introMusicUrl: res.url, introMusicName: res.name }, { merge: true });
+      await logActivity(`đã cập nhật nhạc nền trang Giới thiệu: ${res.name}`);
+      setMessage({ type: "success", text: "Đã tải nhạc nền lên." });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Tải nhạc thất bại." });
+    } finally {
+      setMusicUploading(false);
+    }
+  };
+
+  const removeMusic = async () => {
+    setLoading(true);
+    try {
+      await setDoc(doc(db, "settings", "site"), { introMusicUrl: "", introMusicName: "" }, { merge: true });
+      await logActivity("đã gỡ nhạc nền trang Giới thiệu");
+      setMessage({ type: "success", text: "Đã gỡ nhạc nền." });
+    } catch (err) {
+      setMessage({ type: "error", text: handleFirestoreError(err, OperationType.UPDATE, "settings") });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const roleBadge = (role: UserRole) =>
     role === "admin"
@@ -330,7 +380,7 @@ const Admin: React.FC = () => {
               Nạp dữ liệu gốc
             </button>
           )}
-          {activeTab !== "users" && (
+          {(activeTab === "members" || activeTab === "events") && (
             <button
               onClick={() => openModal()}
               className="flex items-center gap-2 px-6 py-3 bg-[#8B2323] text-white rounded-xl font-bold hover:bg-[#6B1B1B] transition-colors shadow-lg shadow-[#8B2323]/20"
@@ -356,7 +406,8 @@ const Admin: React.FC = () => {
             >
               <div className="flex items-center gap-2">
                 <t.icon className="w-4 h-4" />
-                {t.label} ({t.count})
+                {t.label}
+                {t.count !== undefined && ` (${t.count})`}
                 {t.key === "users" && pendingCount > 0 && (
                   <span className="ml-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px]">
                     {pendingCount} chờ duyệt
@@ -409,7 +460,73 @@ const Admin: React.FC = () => {
         </div>
       )}
 
+      {/* Cài đặt */}
+      {activeTab === "settings" && (
+        <div className="bg-white rounded-3xl border border-[#E5E1D8] shadow-sm p-6 sm:p-8 space-y-6">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-[#FDFCF9] border border-[#E5E1D8] flex items-center justify-center text-[#8B2323] shrink-0">
+              <Music2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-serif text-xl font-bold">Nhạc nền trang Giới thiệu 3D</h3>
+              <p className="text-sm text-[#6B665F] mt-1">
+                Phát khi người xem bấm nút Nhạc hoặc bắt đầu Trình chiếu ở trang{" "}
+                <a href="/gioi-thieu" className="text-[#8B2323] font-semibold hover:underline">
+                  Giới thiệu
+                </a>
+                . Nhạc lặp lại liên tục. Chỉ dùng bản nhạc dòng họ có quyền sử dụng.
+              </p>
+            </div>
+          </div>
+
+          {siteSettings.introMusicUrl ? (
+            <div className="p-4 rounded-2xl bg-[#FDFCF9] border border-[#E5E1D8] space-y-3">
+              <div className="text-sm font-bold text-[#2D2A26] break-all">{siteSettings.introMusicName || "Nhạc nền"}</div>
+              <audio controls preload="none" src={siteSettings.introMusicUrl} className="w-full" />
+            </div>
+          ) : (
+            <div className="p-4 rounded-2xl border border-dashed border-[#E5E1D8] text-sm text-[#A19D96]">
+              Chưa có nhạc nền. Trang Giới thiệu sẽ ẩn nút Nhạc cho đến khi có.
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-3">
+            <input id="music-upload" type="file" accept="audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/aac,audio/ogg,.mp3,.m4a,.aac,.ogg" className="hidden" onChange={handleMusicChange} disabled={musicUploading} />
+            <label
+              htmlFor="music-upload"
+              className={`inline-flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-sm cursor-pointer transition-colors ${
+                musicUploading ? "bg-gray-200 text-gray-500" : "bg-[#8B2323] text-white hover:bg-[#6B1B1B]"
+              }`}
+            >
+              {musicUploading ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+              {musicUploading ? "Đang tải lên..." : siteSettings.introMusicUrl ? "Thay nhạc khác" : "Tải nhạc lên"}
+            </label>
+            {siteSettings.introMusicUrl && (
+              <button
+                onClick={removeMusic}
+                disabled={loading || musicUploading}
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-sm border border-[#E5E1D8] text-[#6B665F] hover:text-red-600 hover:border-red-200 disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" /> Gỡ nhạc
+              </button>
+            )}
+            <a
+              href="/gioi-thieu"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-sm border border-[#E5E1D8] text-[#6B665F] hover:text-[#8B2323]"
+            >
+              <Sparkles className="w-4 h-4" /> Mở trang Giới thiệu
+            </a>
+          </div>
+          <p className="text-xs text-[#A19D96]">MP3, M4A, AAC hoặc OGG, tối đa 15MB. Gợi ý: bản đàn tranh/sáo trúc dài 2 đến 4 phút, âm lượng vừa phải.</p>
+        </div>
+      )}
+
       {/* Table */}
+      {activeTab !== "settings" && (
       <div className="bg-white rounded-3xl border border-[#E5E1D8] overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -641,6 +758,7 @@ const Admin: React.FC = () => {
           </table>
         </div>
       </div>
+      )}
 
       {/* Modal Form */}
       <AnimatePresence>

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -9,6 +9,9 @@ import FamilyTree from "./pages/FamilyTree";
 import Events from "./pages/Events";
 import Admin from "./pages/Admin";
 import Biography from "./pages/Biography";
+
+// Trang 3D tải riêng: three.js không làm nặng các trang khác
+const Intro = lazy(() => import("./pages/Intro"));
 
 export default function App() {
   return (
@@ -23,6 +26,14 @@ export default function App() {
               <Route path="/events" element={<Events />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/biography" element={<Biography />} />
+              <Route
+                path="/gioi-thieu"
+                element={
+                  <Suspense fallback={<div className="fixed inset-0 bg-[#0b0a12]" />}>
+                    <Intro />
+                  </Suspense>
+                }
+              />
             </Routes>
           </Layout>
         </Router>
