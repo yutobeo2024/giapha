@@ -15,34 +15,16 @@ import {
   ArrowRight,
   Info
 } from "lucide-react";
-import { format } from "date-fns";
-import { vi } from "date-fns/locale";
-
-import { useNavigate } from "react-router-dom";
-
-interface Member {
-  id: string;
-  name: string;
-  generation: number;
-  birthDate?: string;
-  deathDate?: string;
-  address?: string;
-  photoUrl?: string;
-  fatherId?: string;
-  motherId?: string;
-  spouseId?: string;
-  spouse?: string;
-  bio?: string;
-  gender: "Nam" | "Nữ";
-  isDirectDescendant: boolean;
-  status: "Sống" | "Mất";
-  branch?: string;
-}
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { STATUS_LABEL, type FamilyMember as Member } from "../types";
+import { avatarUrl } from "../lib/avatar";
 
 const MemberList: React.FC = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const [searchTerm, setSearchTerm] = useState(searchParams.get("q") || "");
   const [selectedGeneration, setSelectedGeneration] = useState<number | "all">("all");
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const navigate = useNavigate();
@@ -88,7 +70,10 @@ const MemberList: React.FC = () => {
         setSelectedMember(membersData[0]);
       }
       setLoading(false);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, "members"));
+    }, (err) => {
+      setError(handleFirestoreError(err, OperationType.LIST, "members"));
+      setLoading(false);
+    });
 
     return () => unsubscribe();
   }, []);
@@ -117,6 +102,9 @@ const MemberList: React.FC = () => {
 
   return (
     <div className="space-y-10 pb-20">
+      {error && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-100 text-red-700 text-sm font-medium">{error}</div>
+      )}
       {/* Header & Search */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
@@ -189,7 +177,7 @@ const MemberList: React.FC = () => {
                   <div className="flex items-start gap-4">
                     <div className="relative">
                       <img 
-                        src={member.photoUrl || `https://ui-avatars.com/api/?name=${member.name}&background=FDFCF9&color=8B2323`} 
+                        src={member.photoUrl || avatarUrl(member.name)}
                         alt={member.name} 
                         className="w-16 h-16 rounded-2xl object-cover border border-[#E5E1D8]"
                       />
@@ -200,8 +188,8 @@ const MemberList: React.FC = () => {
                     <div className="flex-grow">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-bold uppercase tracking-widest text-[#8B2323]">Đời {member.generation}</span>
-                        <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold ${member.status === "Sống" ? "bg-green-50 text-green-600" : "bg-gray-50 text-gray-500"}`}>
-                          {member.status}
+                        <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold ${member.status === "Alive" ? "bg-green-50 text-green-600" : "bg-gray-50 text-gray-500"}`}>
+                          {STATUS_LABEL[member.status || "Deceased"]}
                         </span>
                       </div>
                       <h3 className="font-serif text-lg font-bold text-[#2D2A26] mt-1 group-hover:text-[#8B2323] transition-colors">{member.name}</h3>
@@ -248,13 +236,10 @@ const MemberList: React.FC = () => {
                 >
                   {/* Profile Header */}
                   <div className="relative h-40 bg-[#8B2323]">
-                    <div className="absolute inset-0 opacity-10">
-                      <img src="https://picsum.photos/seed/pattern/800/400" alt="pattern" className="w-full h-full object-cover" />
-                    </div>
                     <div className="absolute -bottom-16 left-8">
                       <div className="relative">
                         <img 
-                          src={selectedMember.photoUrl || `https://ui-avatars.com/api/?name=${selectedMember.name}&size=200&background=FDFCF9&color=8B2323`} 
+                          src={selectedMember.photoUrl || avatarUrl(selectedMember.name, { size: 200 })}
                           alt={selectedMember.name} 
                           className="w-32 h-32 rounded-[32px] border-8 border-white shadow-xl object-cover"
                         />
@@ -273,7 +258,8 @@ const MemberList: React.FC = () => {
                           <User className="w-3 h-3 text-[#8B2323]" /> {selectedMember.gender}
                         </span>
                         <span className="flex items-center gap-1 text-xs font-bold text-[#6B665F]">
-                          <UserPlus className="w-3 h-3 text-[#8B2323]" /> {selectedMember.isDirectDescendant ? "Con trưởng" : "Con thứ"}
+                          <UserPlus className="w-3 h-3 text-[#8B2323]" /> Đời {selectedMember.generation}
+                          {selectedMember.branch ? ` · ${selectedMember.branch}` : ""}
                         </span>
                       </div>
                     </div>
@@ -283,7 +269,7 @@ const MemberList: React.FC = () => {
                       <Info className="absolute top-4 right-4 w-5 h-5 text-[#8B2323] opacity-20" />
                       <h4 className="text-[10px] font-bold uppercase tracking-widest text-[#8B2323] mb-3">Tiểu sử & Gia tích</h4>
                       <p className="text-sm text-[#6B665F] leading-relaxed italic">
-                        {selectedMember.bio || "Thông tin tiểu sử đang được cập nhật. Đây là nơi lưu giữ những câu chuyện, đóng góp và kỷ niệm về thành viên trong dòng họ."}
+                        {selectedMember.biography || "Thông tin tiểu sử đang được cập nhật. Đây là nơi lưu giữ những câu chuyện, đóng góp và kỷ niệm về thành viên trong dòng họ."}
                       </p>
                     </div>
 
@@ -293,7 +279,7 @@ const MemberList: React.FC = () => {
                         <div className="text-[10px] font-bold uppercase tracking-widest text-[#A19D96]">Ngày sinh</div>
                         <div className="flex items-center gap-2 text-sm font-bold text-[#2D2A26]">
                           <Calendar className="w-4 h-4 text-[#8B2323]" />
-                          {selectedMember.birthDate ? format(new Date(selectedMember.birthDate), "dd/MM/yyyy") : "Chưa rõ"}
+                          {selectedMember.birthDate || "Chưa rõ"}
                         </div>
                       </div>
                       <div className="space-y-1">

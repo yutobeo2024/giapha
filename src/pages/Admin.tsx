@@ -1,131 +1,115 @@
-import React, { useState, useEffect } from "react";
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, setDoc } from "firebase/firestore";
-import { db, auth, handleFirestoreError, OperationType } from "../firebase";
-import { onAuthStateChanged, User, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  query,
+  orderBy,
+  writeBatch,
+} from "firebase/firestore";
+import { db, handleFirestoreError, OperationType } from "../firebase";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Edit2, Trash2, Save, X, Users, Calendar, Activity, AlertTriangle, CheckCircle2, Shield, ShieldAlert, Lock, Unlock, Download } from "lucide-react";
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  Save,
+  X,
+  Users,
+  Calendar,
+  AlertTriangle,
+  CheckCircle2,
+  Shield,
+  ShieldCheck,
+  ShieldOff,
+  Lock,
+  Unlock,
+  Download,
+  UserCheck,
+  Clock,
+} from "lucide-react";
 import { format } from "date-fns";
+import { useAuthContext } from "../hooks/AuthContext";
+import { uploadPhoto } from "../lib/image";
+import { avatarUrl } from "../lib/avatar";
+import { SEED_MEMBERS } from "../data/seedMembers";
+import { ROLE_LABEL, STATUS_LABEL, type FamilyMember, type FamilyEvent, type UserDoc, type UserRole } from "../types";
 
-interface FamilyMember {
-  id: string;
-  name: string;
-  birthDate?: string;
-  deathDate?: string;
-  gender: "Nam" | "Nữ";
-  generation: number;
-  branch?: string;
-  role?: string;
-  biography?: string;
-  fatherId?: string;
-  motherId?: string;
-  photoUrl?: string;
-  status?: "Alive" | "Deceased";
-  address?: string;
-  spouse?: string;
-}
+type Tab = "members" | "events" | "users";
+type FormState = Partial<Omit<FamilyMember, "id">> & Partial<Omit<FamilyEvent, "id">>;
+type Message = { type: "success" | "error"; text: string };
 
-interface FamilyEvent {
-  id: string;
-  title: string;
-  date: string;
-  location?: string;
-  description?: string;
-  type: "Kỵ nhật" | "Hội họp" | "Khác";
-}
-
-interface UserDoc {
-  id: string;
-  email: string;
-  displayName: string;
-  photoURL?: string;
-  role: "admin" | "user";
-  isLocked: boolean;
-  createdAt: any;
-  lastLogin: any;
-}
+const inputCls =
+  "w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20";
+const labelCls = "block text-xs font-bold uppercase text-[#A19D96] mb-2";
 
 const Admin: React.FC = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [userRole, setUserRole] = useState<string>("user");
-  const [authLoading, setAuthLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"members" | "events" | "users">("members");
+  const { user, isEditor, isAdmin, isSuperAdmin, loading: authLoading, login } = useAuthContext();
+
+  const [activeTab, setActiveTab] = useState<Tab>("members");
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [events, setEvents] = useState<FamilyEvent[]>([]);
   const [users, setUsers] = useState<UserDoc[]>([]);
+  const [userFilter, setUserFilter] = useState<"all" | "pending">("all");
+
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<any>(null);
-  const [formData, setFormData] = useState<any>({});
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [editingItem, setEditingItem] = useState<FamilyMember | FamilyEvent | null>(null);
+  const [formData, setFormData] = useState<FormState>({});
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<Message | null>(null);
+
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [showSeedConfirm, setShowSeedConfirm] = useState(false);
+
+  // ---------- Subscriptions ----------
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        const userRef = doc(db, "users", currentUser.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          setUserRole(userSnap.data().role || "user");
-        }
-      } else {
-        setUserRole("user");
-      }
-      setUser(currentUser);
-      setAuthLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
+    if (!user || !isEditor) return;
 
-  const isAdmin = () => {
-    return userRole === "admin" || user?.email?.toLowerCase().trim() === "hanhtoami@gmail.com";
-  };
-
-  const isSuperAdmin = (email: string | null | undefined) => {
-    return email?.toLowerCase().trim() === "hanhtoami@gmail.com";
-  };
-
-  useEffect(() => {
-    if (!user || !isAdmin()) return;
-
-    const qMembers = query(collection(db, "members"), orderBy("generation", "asc"), orderBy("name", "asc"));
-    const unsubMembers = onSnapshot(qMembers, 
-      (snapshot) => {
-        setMembers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FamilyMember)));
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, "members");
-      }
+    const unsubMembers = onSnapshot(
+      query(collection(db, "members"), orderBy("generation", "asc"), orderBy("name", "asc")),
+      (snap) => setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as FamilyMember)),
+      (err) => setMessage({ type: "error", text: handleFirestoreError(err, OperationType.LIST, "members") })
     );
-
-    const qEvents = query(collection(db, "events"), orderBy("date", "desc"));
-    const unsubEvents = onSnapshot(qEvents, 
-      (snapshot) => {
-        setEvents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FamilyEvent)));
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, "events");
-      }
+    const unsubEvents = onSnapshot(
+      query(collection(db, "events"), orderBy("date", "desc")),
+      (snap) => setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as FamilyEvent)),
+      (err) => setMessage({ type: "error", text: handleFirestoreError(err, OperationType.LIST, "events") })
     );
-
-    const qUsers = query(collection(db, "users"), orderBy("createdAt", "desc"));
-    const unsubUsers = onSnapshot(qUsers, 
-      (snapshot) => {
-        setUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserDoc)));
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, "users");
-      }
-    );
-
     return () => {
       unsubMembers();
       unsubEvents();
-      unsubUsers();
     };
-  }, [user]);
+  }, [user, isEditor]);
 
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+    const unsubUsers = onSnapshot(
+      query(collection(db, "users"), orderBy("createdAt", "desc")),
+      (snap) => setUsers(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as UserDoc)),
+      (err) => setMessage({ type: "error", text: handleFirestoreError(err, OperationType.LIST, "users") })
+    );
+    return () => unsubUsers();
+  }, [user, isAdmin]);
+
+  // Editor không có tab users: nếu đang ở tab đó thì quay về members
+  useEffect(() => {
+    if (activeTab === "users" && !isAdmin) setActiveTab("members");
+  }, [activeTab, isAdmin]);
+
+  const pendingCount = useMemo(() => users.filter((u) => u.role === "user").length, [users]);
+  const visibleUsers = useMemo(() => {
+    const list = userFilter === "pending" ? users.filter((u) => u.role === "user") : users;
+    // Chờ duyệt lên đầu, trong mỗi nhóm giữ thứ tự createdAt desc
+    return [...list].sort((a, b) => Number(b.role === "user") - Number(a.role === "user"));
+  }, [users, userFilter]);
+
+  // ---------- Guards ----------
   if (authLoading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -134,22 +118,21 @@ const Admin: React.FC = () => {
     );
   }
 
-  if (!user || !isAdmin()) {
+  if (!user || !isEditor) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-8">
         <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center text-red-600 mb-6">
-          <AlertTriangle className="w-10 h-10" />
+          {user ? <Clock className="w-10 h-10 text-amber-600" /> : <AlertTriangle className="w-10 h-10" />}
         </div>
-        <h2 className="text-3xl font-serif font-bold mb-4">Truy cập bị từ chối</h2>
+        <h2 className="text-3xl font-serif font-bold mb-4">{user ? "Tài khoản đang chờ duyệt" : "Truy cập bị từ chối"}</h2>
         <p className="text-[#6B665F] max-w-md mb-8">
-          Bạn không có quyền truy cập vào trang quản trị. Vui lòng đăng nhập bằng tài khoản quản trị viên.
+          {user
+            ? "Quản trị viên sẽ duyệt quyền chỉnh sửa cho bạn. Trong lúc chờ, bạn vẫn xem được toàn bộ gia phả."
+            : "Vui lòng đăng nhập bằng tài khoản Google. Sau khi quản trị viên duyệt, bạn sẽ được quyền chỉnh sửa."}
         </p>
         {!user && (
           <button
-            onClick={() => {
-              const provider = new GoogleAuthProvider();
-              signInWithPopup(auth, provider);
-            }}
+            onClick={login}
             className="px-8 py-3 bg-[#8B2323] text-white rounded-xl font-bold hover:bg-[#6B1B1B] transition-colors shadow-lg shadow-[#8B2323]/20"
           >
             Đăng nhập ngay
@@ -159,6 +142,7 @@ const Admin: React.FC = () => {
     );
   }
 
+  // ---------- Helpers ----------
   const logActivity = async (action: string) => {
     try {
       await addDoc(collection(db, "activities"), {
@@ -167,465 +151,182 @@ const Admin: React.FC = () => {
         action,
         timestamp: new Date().toISOString(),
       });
-    } catch (error) {
-      console.error("Failed to log activity:", error);
+    } catch (err) {
+      console.error("Không ghi được nhật ký:", err);
     }
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setMessage(null);
+  /** Firestore không nhận undefined: loại bỏ các key undefined/"" trước khi ghi. */
+  const clean = <T extends object>(obj: T): T =>
+    Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined && v !== "")) as T;
 
-    try {
-      if (activeTab === "members") {
-        if (editingItem) {
-          await updateDoc(doc(db, "members", editingItem.id), formData);
-          await logActivity(`đã cập nhật thông tin thành viên: ${formData.name}`);
-        } else {
-          await addDoc(collection(db, "members"), formData);
-          await logActivity(`đã thêm thành viên mới: ${formData.name}`);
-        }
-      } else {
-        if (editingItem) {
-          await updateDoc(doc(db, "events", editingItem.id), formData);
-          await logActivity(`đã cập nhật sự kiện: ${formData.title}`);
-        } else {
-          await addDoc(collection(db, "events"), formData);
-          await logActivity(`đã thêm sự kiện mới: ${formData.title}`);
-        }
-      }
-      setMessage({ type: "success", text: "Lưu thành công!" });
-      setIsModalOpen(false);
-      setEditingItem(null);
-      setFormData({});
-    } catch (error) {
-      handleFirestoreError(error, editingItem ? OperationType.UPDATE : OperationType.CREATE, activeTab);
-      setMessage({ type: "error", text: "Đã xảy ra lỗi khi lưu." });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteClick = (id: string, name: string) => {
-    setItemToDelete({ id, name });
-    setIsDeleteModalOpen(true);
-  };
-
-  const confirmDelete = async () => {
-    if (!itemToDelete) return;
-    const { id, name } = itemToDelete;
-
-    try {
-      setLoading(true);
-      await deleteDoc(doc(db, activeTab, id));
-      let actionText = "";
-      if (activeTab === "members") actionText = "thành viên";
-      else if (activeTab === "events") actionText = "sự kiện";
-      else actionText = "người dùng";
-      
-      await logActivity(`đã xóa ${actionText}: ${name}`);
-      setMessage({ type: "success", text: "Xóa thành công!" });
-      setIsDeleteModalOpen(false);
-      setItemToDelete(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, activeTab);
-      setMessage({ type: "error", text: "Đã xảy ra lỗi khi xóa." });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const toggleUserLock = async (userId: string, currentStatus: boolean) => {
-    try {
-      setLoading(true);
-      await updateDoc(doc(db, "users", userId), { isLocked: !currentStatus });
-      await logActivity(`đã ${!currentStatus ? "khóa" : "mở khóa"} người dùng ID: ${userId}`);
-      setMessage({ type: "success", text: `${!currentStatus ? "Khóa" : "Mở khóa"} thành công!` });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, "users");
-      setMessage({ type: "error", text: "Đã xảy ra lỗi khi cập nhật trạng thái người dùng." });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const toggleUserRole = async (userId: string, currentRole: string) => {
-    try {
-      setLoading(true);
-      const newRole = currentRole === "admin" ? "user" : "admin";
-      await updateDoc(doc(db, "users", userId), { role: newRole });
-      await logActivity(`đã thay đổi quyền người dùng ID: ${userId} thành ${newRole}`);
-      setMessage({ type: "success", text: "Cập nhật quyền thành công!" });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, "users");
-      setMessage({ type: "error", text: "Đã xảy ra lỗi khi cập nhật quyền người dùng." });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const openModal = (item: any = null) => {
+  const openModal = (item: FamilyMember | FamilyEvent | null = null) => {
     setEditingItem(item);
-    setFormData(item || (activeTab === "members" ? { gender: "Nam", generation: 1, status: "Alive" } : { type: "Kỵ nhật" }));
-    setImagePreview(item?.photoUrl || null);
+    setFormData(
+      item
+        ? { ...item }
+        : activeTab === "members"
+          ? { gender: "Nam", generation: 1, status: "Alive" }
+          : { type: "Kỵ nhật" }
+    );
+    setImagePreview((item as FamilyMember | null)?.photoUrl || null);
     setIsModalOpen(true);
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingItem(null);
+    setFormData({});
+    setImagePreview(null);
+  };
+
+  // ---------- Actions ----------
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (uploading) return;
+    setLoading(true);
+    setMessage(null);
+
+    const col = activeTab === "members" ? "members" : "events";
+    const label = activeTab === "members" ? `thành viên: ${formData.name}` : `sự kiện: ${formData.title}`;
+    const payload = clean(formData);
+
+    try {
+      if (editingItem) {
+        await updateDoc(doc(db, col, editingItem.id), payload);
+        await logActivity(`đã cập nhật ${label}`);
+      } else {
+        await addDoc(collection(db, col), payload);
+        await logActivity(`đã thêm mới ${label}`);
+      }
+      setMessage({ type: "success", text: "Lưu thành công!" });
+      closeModal();
+    } catch (err) {
+      setMessage({
+        type: "error",
+        text: handleFirestoreError(err, editingItem ? OperationType.UPDATE : OperationType.CREATE, col),
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!itemToDelete || activeTab === "users") return;
+    const { id, name } = itemToDelete;
+    setLoading(true);
+    try {
+      await deleteDoc(doc(db, activeTab, id));
+      await logActivity(`đã xóa ${activeTab === "members" ? "thành viên" : "sự kiện"}: ${name}`);
+      setMessage({ type: "success", text: "Xóa thành công!" });
+      setItemToDelete(null);
+    } catch (err) {
+      setMessage({ type: "error", text: handleFirestoreError(err, OperationType.DELETE, activeTab) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateUser = async (target: UserDoc, patch: Partial<Pick<UserDoc, "role" | "isLocked">>, action: string) => {
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, "users", target.id), patch);
+      await logActivity(`${action}: ${target.displayName || target.email}`);
+      setMessage({ type: "success", text: "Cập nhật thành công!" });
+    } catch (err) {
+      setMessage({ type: "error", text: handleFirestoreError(err, OperationType.UPDATE, "users") });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const setRole = (target: UserDoc, role: UserRole) => {
+    const verbs: Record<UserRole, string> = {
+      editor: "đã duyệt quyền biên tập cho",
+      user: "đã thu hồi quyền biên tập của",
+      admin: "đã nâng quyền quản trị cho",
+    };
+    return updateUser(target, { role }, verbs[role]);
+  };
+
+  const toggleLock = (target: UserDoc) =>
+    updateUser(target, { isLocked: !target.isLocked }, target.isLocked ? "đã mở khóa" : "đã khóa");
+
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 1024 * 1024) { // 1MB limit for base64 in Firestore
-        setMessage({ type: "error", text: "Kích thước ảnh quá lớn (tối đa 1MB)." });
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64String = reader.result as string;
-        setImagePreview(base64String);
-        setFormData({ ...formData, photoUrl: base64String });
-      };
-      reader.readAsDataURL(file);
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    setMessage(null);
+    const localPreview = URL.createObjectURL(file);
+    setImagePreview(localPreview);
+    try {
+      const url = await uploadPhoto(file, user);
+      setFormData((prev) => ({ ...prev, photoUrl: url }));
+      setImagePreview(url);
+    } catch (err) {
+      setImagePreview(formData.photoUrl || null);
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Tải ảnh thất bại." });
+    } finally {
+      URL.revokeObjectURL(localPreview);
+      setUploading(false);
     }
   };
 
-  const importInitialData = async () => {
+  const importSeedData = async () => {
+    setShowSeedConfirm(false);
     setLoading(true);
     setMessage(null);
     try {
-      const initialMembers = [
-        // Gen 1
-        { id: "nguyen-huu-chi", name: "Nguyễn Hữu Chỉ", generation: 1, gender: "Nam", status: "Deceased", biography: "Tướng Công. Kỉ: 29 - 9. Mộ tại Rú Tháp Sơn - Xã Hậu Thành. Tức ông Kẻ Lấu." },
-        
-        // Gen 2
-        { id: "nguyen-huu-han", name: "Nguyễn Hữu Hân", generation: 2, gender: "Nam", status: "Deceased", address: "Xứ Ngọc Lấu - xã Vĩnh Thành", fatherId: "nguyen-huu-chi" },
-        { id: "nguyen-huu-hoan", name: "Nguyễn Hữu Hoan", generation: 2, gender: "Nam", status: "Deceased", address: "Xứ Đỉnh Tải - xã Vĩnh Thành", fatherId: "nguyen-huu-chi" },
-        { id: "nguyen-huu-hoa", name: "Nguyễn Hữu Hòa", generation: 2, gender: "Nam", status: "Deceased", address: "Xứ Cồn Quánh - xã Vĩnh Thành", fatherId: "nguyen-huu-chi" },
-        { id: "nguyen-phuc-duyet", name: "Nguyễn Phúc Duyệt", generation: 2, gender: "Nam", status: "Deceased", biography: "Trở về tỉnh Thanh Hóa và làm Quan Tri Phủ", fatherId: "nguyen-huu-chi" },
-        { id: "nguyen-thi-cong", name: "Nguyễn Thị Công", generation: 2, gender: "Nữ", status: "Deceased", biography: "Lấy chồng người họ Ngô", fatherId: "nguyen-huu-chi" },
-        { id: "nguyen-luc-lang", name: "Nguyễn Lục Lang", generation: 2, gender: "Nam", status: "Deceased", biography: "Tự Trực Tâm, Tức Nguyễn Duy Bòi. Di cư ra xã Hậu Thành. Húy kỉ: 17-02.", spouse: "Lê Nhật Nương", fatherId: "nguyen-huu-chi" },
-        
-        // Gen 3 (Children of Nguyễn Lục Lang)
-        { id: "nguyen-nhat-lang", name: "Nguyễn Nhất Lang", generation: 3, gender: "Nam", status: "Deceased", biography: "Duy Nhất. Kỉ: 06-05 âl.", spouse: "Nguyễn Nhất Nương", fatherId: "nguyen-luc-lang" },
-        { id: "nguyen-duy-quang", name: "Nguyễn Duy Quang", generation: 3, gender: "Nam", status: "Deceased", biography: "Phiêu cư. Chưa rõ ở đâu", fatherId: "nguyen-luc-lang" },
-        { id: "nguyen-duy-che", name: "Nguyễn Duy Chế", generation: 3, gender: "Nam", status: "Deceased", address: "Xã Sơn Thành - Huyện Yên Thành", biography: "Có công lập ấp - Được tặng sắc HUYÊN TRỨ LINH PHÙ BẢN THỔ TÔN THẦN", fatherId: "nguyen-luc-lang" },
-        { id: "nguyen-thi-tien", name: "Nguyễn Thị Tiến", generation: 3, gender: "Nữ", status: "Deceased", fatherId: "nguyen-luc-lang" },
-        { id: "nguyen-thi-may", name: "Nguyễn Thị Mày", generation: 3, gender: "Nữ", status: "Deceased", fatherId: "nguyen-luc-lang" },
-        { id: "nguyen-thi-tru", name: "Nguyễn Thị Trụ", generation: 3, gender: "Nữ", status: "Deceased", fatherId: "nguyen-luc-lang" },
-        { id: "nguyen-thi-lieu", name: "Nguyễn Thị Liễu", generation: 3, gender: "Nữ", status: "Deceased", fatherId: "nguyen-luc-lang" }
-      ];
-
-      for (const member of initialMembers) {
-        const { id, ...data } = member;
-        await setDoc(doc(db, "members", id), data);
+      const batch = writeBatch(db);
+      for (const { id, ...data } of SEED_MEMBERS) {
+        batch.set(doc(db, "members", id), clean(data), { merge: true });
       }
-
-      await logActivity("đã thực hiện import dữ liệu 3 đời đầu tiên");
-      setMessage({ type: "success", text: "Import dữ liệu thành công!" });
-    } catch (error) {
-      console.error("Import failed:", error);
-      setMessage({ type: "error", text: "Import thất bại." });
+      await batch.commit();
+      await logActivity(`đã nạp dữ liệu gốc (${SEED_MEMBERS.length} thành viên, 22 đời)`);
+      setMessage({ type: "success", text: `Đã nạp ${SEED_MEMBERS.length} thành viên.` });
+    } catch (err) {
+      setMessage({ type: "error", text: handleFirestoreError(err, OperationType.WRITE, "members") });
     } finally {
       setLoading(false);
     }
   };
 
-  const importNextData = async () => {
-    setLoading(true);
-    setMessage(null);
-    try {
-      const nextMembers = [
-        // Gen 4 (Children of Nguyễn Nhất Lang)
-        { id: "nguyen-duy-chuc", name: "Nguyễn Duy Chúc", generation: 4, gender: "Nam", status: "Deceased", biography: "Tại nhánh Hậu Thành - Ông Nguyễn Duy Lợi làm Tộc trưởng.", fatherId: "nguyen-nhat-lang" },
-        { id: "nguyen-duy-chung", name: "Nguyễn Duy Chung", generation: 4, gender: "Nam", status: "Deceased", biography: "Làm Quan tri huyện, huyện Thạch Hà - Tỉnh Hà Tĩnh.", fatherId: "nguyen-nhat-lang" },
-        { id: "nguyen-dung-cam", name: "Nguyễn Dũng Cảm", generation: 4, gender: "Nam", status: "Deceased", biography: "Ông Tổ của nhánh Nguyễn Nhuận. Húy Kỉ: 16 - 9 ÂL. Hiệu ông Kẻ Ốc. Được Vương triều tặng sắc: BẢN THỔ TÔN THẦN.", spouse: "Nguyễn Thị Ứng", fatherId: "nguyen-nhat-lang" },
-        { id: "nguyen-thuc", name: "Nguyễn Thúc", generation: 4, gender: "Nam", status: "Deceased", biography: "Chưa rõ đi đâu và ở đâu.", fatherId: "nguyen-nhat-lang" },
-        
-        // Gen 5 (Children of Nguyễn Dũng Cảm)
-        { id: "nguyen-dung-than", name: "Nguyễn Dũng Thân", generation: 5, gender: "Nam", status: "Deceased", biography: "Tự hành vi. Húy Kỉ: 06 - 10. Làm quan tri phủ PHỦ QUỐC OAI.", spouse: "Nguyễn Thị Thanh", fatherId: "nguyen-dung-cam" },
-        { id: "nguyen-thi-tinh", name: "Nguyễn Thị Tình", generation: 5, gender: "Nữ", status: "Deceased", fatherId: "nguyen-dung-cam" },
-        
-        // Gen 6 (Children of Nguyễn Dũng Thân)
-        { id: "nguyen-duy-chinh", name: "Nguyễn Duy Chính", generation: 6, gender: "Nam", status: "Deceased", biography: "Tự Minh Lý. Kỉ: 03 - 7.", fatherId: "nguyen-dung-than" },
-        { id: "nguyen-duy-tri", name: "Nguyễn Duy Trị", generation: 6, gender: "Nam", status: "Deceased", biography: "Ông Trị phiêu cư, chưa rõ.", fatherId: "nguyen-dung-than" },
-        
-        // Gen 7 (Children of Nguyễn Duy Chính)
-        { id: "nguyen-duy-ngu", name: "Nguyễn Duy Ngu", generation: 7, gender: "Nam", status: "Deceased", biography: "Tự đức. Chi ông Thông - Yên Thịnh - Phúc Thành.", spouse: "Nguyễn Thị Tâm", fatherId: "nguyen-duy-chinh" },
-        { id: "nguyen-duy-phu", name: "Nguyễn Duy Phú", generation: 7, gender: "Nam", status: "Deceased", biography: "Tự chương. Húy Kỉ: 06 - 3. Tại nhà thờ Tổ - Xuân Viên - Phúc Thành.", fatherId: "nguyen-duy-chinh" },
-        { id: "nguyen-duy-sinh", name: "Nguyễn Duy Sinh", generation: 7, gender: "Nam", status: "Deceased", biography: "Tự vinh. Con trai Duy Bản - Cả 2 cha con đều chết. Ông: Nguyễn Duy Hiền thờ tự.", fatherId: "nguyen-duy-chinh" }
-      ];
+  // ---------- Render ----------
+  const tabs: { key: Tab; label: string; icon: React.ElementType; count: number; adminOnly?: boolean }[] = [
+    { key: "members", label: "Thành viên", icon: Users, count: members.length },
+    { key: "events", label: "Sự kiện", icon: Calendar, count: events.length },
+    { key: "users", label: "Người dùng", icon: Shield, count: users.length, adminOnly: true },
+  ];
 
-      for (const member of nextMembers) {
-        const { id, ...data } = member;
-        await setDoc(doc(db, "members", id), data);
-      }
-
-      await logActivity("đã thực hiện import dữ liệu đời 4 đến đời 7");
-      setMessage({ type: "success", text: "Import dữ liệu đời 4-7 thành công!" });
-    } catch (error) {
-      console.error("Import failed:", error);
-      setMessage({ type: "error", text: "Import thất bại." });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const importGen89Data = async () => {
-    setLoading(true);
-    setMessage(null);
-    try {
-      const gen89Members = [
-        // Gen 8
-        { id: "nguyen-nhuan-tuc", name: "Nguyễn Nhuận Túc", generation: 8, gender: "Nam", status: "Deceased", biography: "Chi ông Thông. Húy Kỉ:.... Vợ: Mai Thị Hành.", spouse: "Mai Thị Hành", fatherId: "nguyen-duy-ngu" },
-        { id: "nguyen-nhuan-co", name: "Nguyễn Nhuận Cơ", generation: 8, gender: "Nam", status: "Deceased", biography: "Chưa rõ.", fatherId: "nguyen-duy-ngu" },
-        { id: "nguyen-nhuan-tai-gen8", name: "Nguyễn Nhuận Tải", generation: 8, gender: "Nam", status: "Deceased", biography: "Chưa rõ.", fatherId: "nguyen-duy-ngu" },
-        { id: "nguyen-nhuan-le-gen8", name: "Nguyễn Nhuận Lệ", generation: 8, gender: "Nam", status: "Deceased", biography: "Chưa rõ.", fatherId: "nguyen-duy-ngu" },
-        { id: "nguyen-duy-ha", name: "Nguyễn Duy Hà", generation: 8, gender: "Nam", status: "Deceased", biography: "Tự Nam. Tại Chi ông Nguyễn Đình Hoàng - Đức Thành. Làm Quan Tri huyện Hương Sơn, Hà Tĩnh.", fatherId: "nguyen-duy-phu" },
-        { id: "nguyen-duy-hien", name: "Nguyễn Duy Hiến", generation: 8, gender: "Nam", status: "Deceased", biography: "Tự Du. Tại nhà thờ Tổ ông Niệm Tộc trưởng. Vợ: Nguyễn Thị Viêm.", spouse: "Nguyễn Thị Viêm", fatherId: "nguyen-duy-phu" },
-        { id: "nguyen-duy-tai", name: "Nguyễn Duy Tài", generation: 8, gender: "Nam", status: "Deceased", biography: "Tức Huỳnh. Tự Sinh. Tại ông Long Trinh Tộc trưởng. Vợ: Dương Thị Tình.", spouse: "Dương Thị Tình", fatherId: "nguyen-duy-phu" },
-        { id: "nguyen-duy-than", name: "Nguyễn Duy Thận", generation: 8, gender: "Nam", status: "Deceased", biography: "Tự Đăng. Tại Văn Thành, ông Hưng (Phổ) Tộc trưởng.", fatherId: "nguyen-duy-phu" },
-
-        // Gen 9
-        { id: "nguyen-duy-hai", name: "Nguyễn Duy Hải", generation: 9, gender: "Nam", status: "Deceased", fatherId: "nguyen-duy-ha" },
-        { id: "nguyen-nhuan-ba", name: "Nguyễn Nhuận Bá", generation: 9, gender: "Nam", status: "Deceased", biography: "Chi ông Niệm - Phúc Thành. Vợ 1: Phan Thị Tính, 2: Phan Thị Thiện, 3: Trần Thị Niệm.", fatherId: "nguyen-duy-hien" },
-        { id: "nguyen-nhuan-due", name: "Nguyễn Nhuận Duệ", generation: 9, gender: "Nam", status: "Deceased", biography: "Húy Kỉ: 30 - 9. Chi ông Niêm - Phúc Thành. Vợ: Nguyễn Thị Kiệm.", spouse: "Nguyễn Thị Kiệm", fatherId: "nguyen-duy-hien" },
-        { id: "nguyen-thi-dinh", name: "Nguyễn Thị Đình", generation: 9, gender: "Nữ", status: "Deceased", fatherId: "nguyen-duy-hien" },
-        { id: "nguyen-huu-hang", name: "Nguyễn Hựu Hằng", generation: 9, gender: "Nam", status: "Deceased", biography: "Chức HOÀNG TRIỀU ĐIỆN TRUNG TỪ ĐƯỜNG. Vợ 1: Nguyễn Thị Chiên, 2: Nguyễn Thị Tần.", fatherId: "nguyen-duy-tai" },
-        { id: "nguyen-nhuan-oanh", name: "Nguyễn Nhuận Oánh", generation: 9, gender: "Nam", status: "Deceased", biography: "Tự trác. Chi ông Trọng - Phúc Thành. Vợ: Trần Thị Ất.", spouse: "Trần Thị Ất", fatherId: "nguyen-duy-tai" },
-        { id: "nguyen-phuc-sinh-gen9", name: "Nguyễn Phúc Sinh", generation: 9, gender: "Nam", status: "Deceased", biography: "Tự viêm. Chức vụ: THĂNG QUÂN CHỈ HUY SỨ. Chi ông Hùng, Loan - Hậu Thành.", fatherId: "nguyen-duy-tai" },
-        { id: "nguyen-thi-hong", name: "Nguyễn Thị Hồng", generation: 9, gender: "Nữ", status: "Deceased", fatherId: "nguyen-duy-tai" },
-        { id: "nguyen-hue-nghiem", name: "Nguyễn Huệ Nghiêm", generation: 9, gender: "Nam", status: "Deceased", biography: "Chi ông Hưng ( Phổ) - Văn Thành. Vợ: Nguyễn Thị Chấn.", spouse: "Nguyễn Thị Chấn", fatherId: "nguyen-duy-than" },
-        { id: "nguyen-tho-thang", name: "Nguyễn Thọ Thắng", generation: 9, gender: "Nam", status: "Deceased", biography: "Chi ông Hưng ( Phổ) - Văn Thành. Vợ 1: Đào Thị Đôn, 2: Nguyễn Thị Cựa, 3: Ngô Thị Mãi.", fatherId: "nguyen-duy-than" },
-        { id: "nguyen-nhuan-nam", name: "Nguyễn Nhuận Nam", generation: 9, gender: "Nam", status: "Deceased", fatherId: "nguyen-nhuan-tuc" },
-        { id: "nguyen-nhuan-huy", name: "Nguyễn Nhuận Huy", generation: 9, gender: "Nam", status: "Deceased", biography: "Vợ: Nguyễn Thị Bảo.", spouse: "Nguyễn Thị Bảo", fatherId: "nguyen-nhuan-tuc" },
-        { id: "nguyen-nhuan-mai", name: "Nguyễn Nhuận Mai", generation: 9, gender: "Nam", status: "Deceased", biography: "Vợ: Nguyễn Thị Kì.", spouse: "Nguyễn Thị Kì", fatherId: "nguyen-nhuan-tuc" }
-      ];
-
-      for (const member of gen89Members) {
-        const { id, ...data } = member;
-        await setDoc(doc(db, "members", id), data);
-      }
-
-      await logActivity("đã thực hiện import dữ liệu đời 8 và đời 9");
-      setMessage({ type: "success", text: "Import dữ liệu đời 8-9 thành công!" });
-    } catch (error) {
-      console.error("Import failed:", error);
-      setMessage({ type: "error", text: "Import thất bại." });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const importGen10Data = async () => {
-    setLoading(true);
-    setMessage(null);
-    try {
-      const gen10Members = [
-        // Children of Nguyễn Duy Hải
-        { id: "nguyen-phuc-huyen", name: "Nguyễn Phúc Huyền", generation: 10, gender: "Nam", status: "Deceased", biography: "Húy Kỉ:.... Chi ông Hoàng - Đức Thành. Vợ: Nguyễn Thị Duyên.", spouse: "Nguyễn Thị Duyên", fatherId: "nguyen-duy-hai" },
-        { id: "nguyen-phuc-dinh", name: "Nguyễn Phúc Đinh", generation: 10, gender: "Nam", status: "Deceased", biography: "Húy Kỉ:.... Chi ông Hoàng - Đức Thành. Vợ 1: Trần Thị Sĩ, 2: Trần Thị Tao.", fatherId: "nguyen-duy-hai" },
-        { id: "nguyen-phuc-than", name: "Nguyễn Phúc Thân", generation: 10, gender: "Nam", status: "Deceased", biography: "Kỉ:.... Chi ông Hoàng - Đức Thành. Vợ: Trần Thị Đồng.", spouse: "Trần Thị Đồng", fatherId: "nguyen-duy-hai" },
-        { id: "nguyen-phuc-tuu", name: "Nguyễn Phúc Tửu", generation: 10, gender: "Nam", status: "Deceased", biography: "Kỉ:.... Chi ông Hoàng - Đức Thành. Vợ: Bùi Thị Chương.", spouse: "Bùi Thị Chương", fatherId: "nguyen-duy-hai" },
-        { id: "nguyen-phuc-yen", name: "Nguyễn Phúc Yên", generation: 10, gender: "Nam", status: "Deceased", biography: "Kỉ:.... Chi ông Hoàng - Đức Thành. Vợ: Bùi Thị Phương.", spouse: "Bùi Thị Phương", fatherId: "nguyen-duy-hai" },
-
-        // Children of Nguyễn Nhuận Bá
-        { id: "nguyen-nhuan-dong", name: "Nguyễn Nhuận Đống", generation: 10, gender: "Nam", status: "Deceased", biography: "Kỉ.... Chi ông Niệm - Phúc Thành. Vợ: Hoàng Thị Đôn.", spouse: "Hoàng Thị Đôn", fatherId: "nguyen-nhuan-ba" },
-
-        // Children of Nguyễn Nhuận Duệ
-        { id: "nguyen-nhuan-tap", name: "Nguyễn Nhuận Tập", generation: 10, gender: "Nam", status: "Deceased", biography: "Kỉ: 20 - 5. Chi ông Niệm - Phúc Thành.", fatherId: "nguyen-nhuan-due" },
-        { id: "nguyen-nhuan-trach", name: "Nguyễn Nhuận Trạch", generation: 10, gender: "Nam", status: "Deceased", biography: "Kỉ: 06 - 2. Chi ông Niệm - Phúc Thành. Vợ: Nguyễn Thị Nhự.", spouse: "Nguyễn Thị Nhự", fatherId: "nguyen-nhuan-due" },
-        { id: "nguyen-nhuan-hoe", name: "Nguyễn Nhuận Hòe", generation: 10, gender: "Nam", status: "Deceased", biography: "Kỉ: 09 - 2. Chi ông Niệm - Phúc Thành. Vợ: Nguyễn Thị Hẳn.", spouse: "Nguyễn Thị Hẳn", fatherId: "nguyen-nhuan-due" },
-
-        // Children of Nguyễn Hựu Hằng
-        { id: "nguyen-nhuan-can", name: "Nguyễn Nhuận Căn", generation: 10, gender: "Nam", status: "Deceased", biography: "Chức vụ: NGỤ TRƯỞNG ƯU BÌNH và THẬP LÍ HẦU. Chi ông Long (Trinh) - Phúc Thành. Vợ: Phan Thị Phúc.", spouse: "Phan Thị Phúc", fatherId: "nguyen-huu-hang" },
-        { id: "nguyen-nhuan-duc-gen10", name: "Nguyễn Nhuận Dục", generation: 10, gender: "Nam", status: "Deceased", fatherId: "nguyen-huu-hang" },
-        { id: "nguyen-nhuan-chi-gen10", name: "Nguyễn Nhuận Chí", generation: 10, gender: "Nam", status: "Deceased", fatherId: "nguyen-huu-hang" },
-        { id: "nguyen-nhuan-thao", name: "Nguyễn Nhuận Thảo", generation: 10, gender: "Nam", status: "Deceased", fatherId: "nguyen-huu-hang" },
-
-        // Children of Nguyễn Nhuận Oánh
-        { id: "nguyen-nhuan-trac-gen10", name: "Nguyễn Nhuận Trác", generation: 10, gender: "Nam", status: "Deceased", biography: "Chức vụ: ĐẬU TIẾN SĨ. Húy Kỉ: 01 - 4 âl. Chi ông Long (Trọng) Phúc Thành. Vợ: Nguyễn Thị Xuyên.", spouse: "Nguyễn Thị Xuyên", fatherId: "nguyen-nhuan-oanh" },
-        { id: "nguyen-nhuan-boi-gen10", name: "Nguyễn Nhuận Bòi", generation: 10, gender: "Nam", status: "Deceased", biography: "Kỉ: .... Chi ông Long (Trọng) Phúc Thành.", fatherId: "nguyen-nhuan-oanh" },
-
-        // Children of Nguyễn Phúc Sinh
-        { id: "nguyen-trong-nhuong", name: "Nguyễn Trọng Nhương", generation: 10, gender: "Nam", status: "Deceased", biography: "Kỉ: 29 - 12. Chi ông Hùng, Loan - Hậu Thành.", fatherId: "nguyen-phuc-sinh-gen9" },
-
-        // Children of Nguyễn Thọ Thắng
-        { id: "nguyen-tho-cung", name: "Nguyễn Thọ Cung", generation: 10, gender: "Nam", status: "Deceased", biography: "Kỉ:.... Chi ông Hưng (Phổ) Văn Thành.", fatherId: "nguyen-tho-thang" },
-        { id: "nguyen-tho-sac", name: "Nguyễn Thọ Sắc", generation: 10, gender: "Nam", status: "Deceased", biography: "Húy Kỉ.... Chi ông Hưng (Phổ) Văn Thành. Vợ 1: Nguyễn Thị Thích, 2: Nguyễn Thị Vinh.", fatherId: "nguyen-tho-thang" },
-
-        // Children of Nguyễn Nhuận Nam
-        { id: "nguyen-nhuan-da", name: "Nguyễn Nhuận Đa", generation: 10, gender: "Nam", status: "Deceased", biography: "Húy Kỉ:.... Chi ông Thông - Yên Thịnh - Phúc Thành. Vợ 1: Nguyễn Thị Hậu, 2: Nguyễn Thị Sinh.", fatherId: "nguyen-nhuan-nam" },
-
-        // Children of Nguyễn Nhuận Huy
-        { id: "nguyen-nhuan-tri-gen10", name: "Nguyễn Nhuận Trí", generation: 10, gender: "Nam", status: "Deceased", biography: "Húy Kỉ:.... Chi ông Thông - Yên Thịnh - Phúc Thành. Vợ: Phan Thị Tư.", spouse: "Phan Thị Tư", fatherId: "nguyen-nhuan-huy" },
-        { id: "nguyen-nhuan-nui", name: "Nguyễn Nhuận Núi", generation: 10, gender: "Nam", status: "Deceased", biography: "Húy Kỉ:.... Chi ông Thông - Yên Thịnh - Phúc Thành. Vợ: Nguyễn Thị Tâm.", spouse: "Nguyễn Thị Tâm", fatherId: "nguyen-nhuan-huy" }
-      ];
-
-      for (const member of gen10Members) {
-        const { id, ...data } = member;
-        await setDoc(doc(db, "members", id), data);
-      }
-
-      await logActivity("đã thực hiện import dữ liệu đời 10");
-      setMessage({ type: "success", text: "Import dữ liệu đời 10 thành công!" });
-    } catch (error) {
-      console.error("Import failed:", error);
-      setMessage({ type: "error", text: "Import thất bại." });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const importGen11To15Data = async () => {
-    setLoading(true);
-    setMessage(null);
-    try {
-      const gen11To15Members = [
-        // Gen 11 - Representative members from major branches
-        { id: "nguyen-phuc-can", name: "Nguyễn Phúc Cẩn", generation: 11, gender: "Nam", status: "Deceased", fatherId: "nguyen-phuc-huyen" },
-        { id: "nguyen-phuc-vuong", name: "Nguyễn Phúc Vượng", generation: 11, gender: "Nam", status: "Deceased", fatherId: "nguyen-phuc-huyen" },
-        { id: "nguyen-nhuan-truong", name: "Nguyễn Nhuận Trường", generation: 11, gender: "Nam", status: "Deceased", fatherId: "nguyen-nhuan-dong" },
-        { id: "nguyen-nhuan-hoc", name: "Nguyễn Nhuận Học", generation: 11, gender: "Nam", status: "Deceased", fatherId: "nguyen-nhuan-tap" },
-        { id: "nguyen-nhuan-co-gen11", name: "Nguyễn Nhuận Cơ", generation: 11, gender: "Nam", status: "Deceased", fatherId: "nguyen-nhuan-can" },
-        { id: "nguyen-nhuan-long-gen11", name: "Nguyễn Nhuận Long", generation: 11, gender: "Nam", status: "Deceased", fatherId: "nguyen-nhuan-trac-gen10" },
-        { id: "nguyen-trong-hung", name: "Nguyễn Trọng Hùng", generation: 11, gender: "Nam", status: "Alive", fatherId: "nguyen-trong-nhuong" },
-        { id: "nguyen-trong-loan", name: "Nguyễn Trọng Loan", generation: 11, gender: "Nam", status: "Alive", fatherId: "nguyen-trong-nhuong" },
-        { id: "nguyen-tho-hung-gen11", name: "Nguyễn Thọ Hưng", generation: 11, gender: "Nam", status: "Deceased", fatherId: "nguyen-tho-cung" },
-        { id: "nguyen-tho-pho-gen11", name: "Nguyễn Thọ Phổ", generation: 11, gender: "Nam", status: "Deceased", fatherId: "nguyen-tho-sac" },
-        { id: "nguyen-nhuan-thong-gen11", name: "Nguyễn Nhuận Thông", generation: 11, gender: "Nam", status: "Alive", fatherId: "nguyen-nhuan-da" },
-        
-        // Gen 12
-        { id: "nguyen-phuc-loc", name: "Nguyễn Phúc Lộc", generation: 12, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-can" },
-        { id: "nguyen-nhuan-minh-gen12", name: "Nguyễn Nhuận Minh", generation: 12, gender: "Nam", status: "Alive", fatherId: "nguyen-nhuan-truong" },
-        { id: "nguyen-trong-anh", name: "Nguyễn Trọng Anh", generation: 12, gender: "Nam", status: "Alive", fatherId: "nguyen-trong-hung" },
-        
-        // Gen 13
-        { id: "nguyen-phuc-thanh-gen13", name: "Nguyễn Phúc Thành", generation: 13, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-loc" },
-        { id: "nguyen-nhuan-dung-gen13", name: "Nguyễn Nhuận Dũng", generation: 13, gender: "Nam", status: "Alive", fatherId: "nguyen-nhuan-minh-gen12" },
-        
-        // Gen 14
-        { id: "nguyen-phuc-duy", name: "Nguyễn Phúc Duy", generation: 14, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-thanh-gen13" },
-        
-        // Gen 15
-        { id: "nguyen-phuc-hoang", name: "Nguyễn Phúc Hoàng", generation: 15, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-duy" }
-      ];
-
-      for (const member of gen11To15Members) {
-        const { id, ...data } = member;
-        await setDoc(doc(db, "members", id), data);
-      }
-
-      await logActivity("đã thực hiện import dữ liệu đời 11 đến 15");
-      setMessage({ type: "success", text: "Import dữ liệu đời 11-15 thành công!" });
-    } catch (error) {
-      console.error("Import failed:", error);
-      setMessage({ type: "error", text: "Import thất bại." });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const importGen16To22Data = async () => {
-    setLoading(true);
-    setMessage(null);
-    try {
-      const gen16To22Members = [
-        // Gen 16
-        { id: "nguyen-phuc-lam", name: "Nguyễn Phúc Lâm", generation: 16, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-hoang" },
-        
-        // Gen 17
-        { id: "nguyen-phuc-son", name: "Nguyễn Phúc Sơn", generation: 17, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-lam" },
-        
-        // Gen 18
-        { id: "nguyen-phuc-hai-gen18", name: "Nguyễn Phúc Hải", generation: 18, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-son" },
-        
-        // Gen 19
-        { id: "nguyen-phuc-quan", name: "Nguyễn Phúc Quân", generation: 19, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-hai-gen18" },
-        
-        // Gen 20
-        { id: "nguyen-phuc-tu", name: "Nguyễn Phúc Tú", generation: 20, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-quan" },
-        
-        // Gen 21
-        { id: "nguyen-phuc-khoi", name: "Nguyễn Phúc Khôi", generation: 21, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-tu" },
-        
-        // Gen 22 - The youngest generation
-        { id: "nguyen-phuc-an", name: "Nguyễn Phúc An", generation: 22, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-khoi" }
-      ];
-
-      for (const member of gen16To22Members) {
-        const { id, ...data } = member;
-        await setDoc(doc(db, "members", id), data);
-      }
-
-      await logActivity("đã thực hiện import dữ liệu đời 16 đến 22");
-      setMessage({ type: "success", text: "Import dữ liệu đời 16-22 thành công!" });
-    } catch (error) {
-      console.error("Import failed:", error);
-      setMessage({ type: "error", text: "Import thất bại." });
-    } finally {
-      setLoading(false);
-    }
-  };
+  const roleBadge = (role: UserRole) =>
+    role === "admin"
+      ? "bg-purple-50 text-purple-600"
+      : role === "editor"
+        ? "bg-emerald-50 text-emerald-600"
+        : "bg-amber-50 text-amber-700";
 
   return (
     <div className="space-y-8">
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h1 className="font-serif text-4xl font-bold mb-2">Quản trị Hệ thống</h1>
-          <p className="text-[#6B665F]">Quản lý danh sách thành viên và sự kiện gia đình.</p>
+          <p className="text-[#6B665F]">
+            {isAdmin ? "Quản lý thành viên, sự kiện và duyệt người dùng." : "Quản lý danh sách thành viên và sự kiện gia đình."}
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-4">
-          {activeTab === "members" && (
-            <div className="flex gap-2">
-              <button
-                onClick={importInitialData}
-                disabled={loading}
-                className="flex items-center gap-2 px-4 py-3 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20 disabled:opacity-50 text-xs"
-              >
-                <Download className="w-4 h-4" />
-                Đời 1-3
-              </button>
-              <button
-                onClick={importNextData}
-                disabled={loading}
-                className="flex items-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20 disabled:opacity-50 text-xs"
-              >
-                <Download className="w-4 h-4" />
-                Đời 4-7
-              </button>
-              <button
-                onClick={importGen89Data}
-                disabled={loading}
-                className="flex items-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 transition-colors shadow-lg shadow-purple-600/20 disabled:opacity-50 text-xs"
-              >
-                <Download className="w-4 h-4" />
-                Đời 8-9
-              </button>
-              <button
-                onClick={importGen10Data}
-                disabled={loading}
-                className="flex items-center gap-2 px-4 py-3 bg-orange-600 text-white rounded-xl font-bold hover:bg-orange-700 transition-colors shadow-lg shadow-orange-600/20 disabled:opacity-50 text-xs"
-              >
-                <Download className="w-4 h-4" />
-                Đời 10
-              </button>
-              <button
-                onClick={importGen11To15Data}
-                disabled={loading}
-                className="flex items-center gap-2 px-4 py-3 bg-pink-600 text-white rounded-xl font-bold hover:bg-pink-700 transition-colors shadow-lg shadow-pink-600/20 disabled:opacity-50 text-xs"
-              >
-                <Download className="w-4 h-4" />
-                Đời 11-15
-              </button>
-              <button
-                onClick={importGen16To22Data}
-                disabled={loading}
-                className="flex items-center gap-2 px-4 py-3 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition-colors shadow-lg shadow-rose-600/20 disabled:opacity-50 text-xs"
-              >
-                <Download className="w-4 h-4" />
-                Đời 16-22
-              </button>
-            </div>
+        <div className="flex flex-wrap items-center gap-3">
+          {activeTab === "members" && isAdmin && (
+            <button
+              onClick={() => setShowSeedConfirm(true)}
+              disabled={loading}
+              className="flex items-center gap-2 px-4 py-3 bg-white border border-[#E5E1D8] text-[#6B665F] rounded-xl font-bold hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+              title="Nạp 92 thành viên 22 đời từ dữ liệu gốc (ghi đè theo id, không xóa dữ liệu khác)"
+            >
+              <Download className="w-4 h-4" />
+              Nạp dữ liệu gốc
+            </button>
           )}
           {activeTab !== "users" && (
             <button
@@ -641,45 +342,33 @@ const Admin: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex gap-4 border-b border-[#E5E1D8] overflow-x-auto">
-        <button
-          onClick={() => setActiveTab("members")}
-          className={`px-6 py-4 font-bold text-sm transition-all relative whitespace-nowrap ${
-            activeTab === "members" ? "text-[#8B2323]" : "text-[#A19D96] hover:text-[#2D2A26]"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <Users className="w-4 h-4" />
-            Thành viên ({members.length})
-          </div>
-          {activeTab === "members" && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-1 bg-[#8B2323] rounded-t-full" />}
-        </button>
-        <button
-          onClick={() => setActiveTab("events")}
-          className={`px-6 py-4 font-bold text-sm transition-all relative whitespace-nowrap ${
-            activeTab === "events" ? "text-[#8B2323]" : "text-[#A19D96] hover:text-[#2D2A26]"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4" />
-            Sự kiện ({events.length})
-          </div>
-          {activeTab === "events" && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-1 bg-[#8B2323] rounded-t-full" />}
-        </button>
-        <button
-          onClick={() => setActiveTab("users")}
-          className={`px-6 py-4 font-bold text-sm transition-all relative whitespace-nowrap ${
-            activeTab === "users" ? "text-[#8B2323]" : "text-[#A19D96] hover:text-[#2D2A26]"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4" />
-            Người dùng ({users.length})
-          </div>
-          {activeTab === "users" && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-1 bg-[#8B2323] rounded-t-full" />}
-        </button>
+        {tabs
+          .filter((t) => !t.adminOnly || isAdmin)
+          .map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={`px-6 py-4 font-bold text-sm transition-all relative whitespace-nowrap ${
+                activeTab === t.key ? "text-[#8B2323]" : "text-[#A19D96] hover:text-[#2D2A26]"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <t.icon className="w-4 h-4" />
+                {t.label} ({t.count})
+                {t.key === "users" && pendingCount > 0 && (
+                  <span className="ml-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px]">
+                    {pendingCount} chờ duyệt
+                  </span>
+                )}
+              </div>
+              {activeTab === t.key && (
+                <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-1 bg-[#8B2323] rounded-t-full" />
+              )}
+            </button>
+          ))}
       </div>
 
-      {/* Success/Error Message */}
+      {/* Message */}
       <AnimatePresence>
         {message && (
           <motion.div
@@ -687,19 +376,38 @@ const Admin: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             className={`p-4 rounded-xl flex items-center gap-3 ${
-              message.type === "success" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-red-50 text-red-700 border border-red-100"
+              message.type === "success"
+                ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                : "bg-red-50 text-red-700 border border-red-100"
             }`}
           >
             {message.type === "success" ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
             <span className="font-medium">{message.text}</span>
-            <button onClick={() => setMessage(null)} className="ml-auto">
+            <button onClick={() => setMessage(null)} className="ml-auto" aria-label="Đóng">
               <X className="w-4 h-4 opacity-50" />
             </button>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Content Table */}
+      {/* Users filter */}
+      {activeTab === "users" && (
+        <div className="flex gap-2">
+          {(["all", "pending"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setUserFilter(f)}
+              className={`px-4 py-2 rounded-full text-xs font-bold transition-all ${
+                userFilter === f ? "bg-[#8B2323] text-white" : "bg-white border border-[#E5E1D8] text-[#6B665F]"
+              }`}
+            >
+              {f === "all" ? `Tất cả (${users.length})` : `Chờ duyệt (${pendingCount})`}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Table */}
       <div className="bg-white rounded-3xl border border-[#E5E1D8] overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -730,52 +438,66 @@ const Admin: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5E1D8]">
-              {activeTab === "members" ? (
+              {activeTab === "members" &&
                 members.map((member) => (
                   <tr key={member.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <img
-                          src={member.photoUrl || `https://ui-avatars.com/api/?name=${member.name}`}
-                          className="w-10 h-10 rounded-full border border-[#E5E1D8]"
+                          src={member.photoUrl || avatarUrl(member.name, { gender: member.gender })}
+                          alt=""
+                          className="w-10 h-10 rounded-full border border-[#E5E1D8] object-cover"
                         />
                         <div className="font-bold text-[#2D2A26]">{member.name}</div>
                       </div>
                     </td>
                     <td className="px-6 py-4 text-sm text-[#6B665F]">Thế hệ {member.generation}</td>
                     <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                        member.gender === "Nam" ? "bg-blue-50 text-blue-600" : "bg-pink-50 text-pink-600"
-                      }`}>
+                      <span
+                        className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                          member.gender === "Nam" ? "bg-blue-50 text-blue-600" : "bg-pink-50 text-pink-600"
+                        }`}
+                      >
                         {member.gender}
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                        member.status === "Alive" ? "bg-emerald-50 text-emerald-600" : "bg-gray-100 text-gray-600"
-                      }`}>
-                        {member.status === "Alive" ? "Còn sống" : "Đã mất"}
+                      <span
+                        className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                          member.status === "Alive" ? "bg-emerald-50 text-emerald-600" : "bg-gray-100 text-gray-600"
+                        }`}
+                      >
+                        {STATUS_LABEL[member.status || "Deceased"]}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => openModal(member)} className="p-2 text-[#6B665F] hover:text-[#8B2323] hover:bg-[#8B2323]/5 rounded-lg transition-all">
+                        <button
+                          onClick={() => openModal(member)}
+                          className="p-2 text-[#6B665F] hover:text-[#8B2323] hover:bg-[#8B2323]/5 rounded-lg transition-all"
+                          title="Sửa"
+                        >
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleDeleteClick(member.id, member.name)} className="p-2 text-[#6B665F] hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => setItemToDelete({ id: member.id, name: member.name })}
+                            className="p-2 text-[#6B665F] hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                            title="Xóa"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
-                ))
-              ) : activeTab === "events" ? (
+                ))}
+
+              {activeTab === "events" &&
                 events.map((event) => (
                   <tr key={event.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 font-bold text-[#2D2A26]">{event.title}</td>
-                    <td className="px-6 py-4 text-sm text-[#6B665F]">
-                      {format(new Date(event.date), "HH:mm, d/M/yyyy")}
-                    </td>
+                    <td className="px-6 py-4 text-sm text-[#6B665F]">{format(new Date(event.date), "HH:mm, d/M/yyyy")}</td>
                     <td className="px-6 py-4">
                       <span className="px-2 py-1 bg-[#FDFCF9] border border-[#E5E1D8] rounded text-[10px] font-bold uppercase text-[#8B2323]">
                         {event.type}
@@ -783,85 +505,135 @@ const Admin: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => openModal(event)} className="p-2 text-[#6B665F] hover:text-[#8B2323] hover:bg-[#8B2323]/5 rounded-lg transition-all">
+                        <button
+                          onClick={() => openModal(event)}
+                          className="p-2 text-[#6B665F] hover:text-[#8B2323] hover:bg-[#8B2323]/5 rounded-lg transition-all"
+                          title="Sửa"
+                        >
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleDeleteClick(event.id, event.title)} className="p-2 text-[#6B665F] hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                users.map((u) => (
-                  <tr key={u.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={u.photoURL || `https://ui-avatars.com/api/?name=${u.displayName}`}
-                          className="w-10 h-10 rounded-full border border-[#E5E1D8]"
-                        />
-                        <div className="flex flex-col">
-                          <div className="font-bold text-[#2D2A26]">{u.displayName}</div>
-                          <div className="text-xs text-[#6B665F]">{u.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                          u.role === "admin" ? "bg-purple-50 text-purple-600" : "bg-blue-50 text-blue-600"
-                        }`}>
-                          {u.role}
-                        </span>
-                        {isSuperAdmin(user?.email) && u.email !== user?.email && (
-                          <button 
-                            onClick={() => toggleUserRole(u.id, u.role)}
-                            className="p-1 text-[#A19D96] hover:text-[#8B2323] transition-colors"
-                            title="Thay đổi quyền"
+                        {isAdmin && (
+                          <button
+                            onClick={() => setItemToDelete({ id: event.id, name: event.title })}
+                            className="p-2 text-[#6B665F] hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                            title="Xóa"
                           >
-                            <ShieldAlert className="w-3 h-3" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                        !u.isLocked ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
-                      }`}>
-                        {!u.isLocked ? "Hoạt động" : "Bị khóa"}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-[#6B665F]">
-                      {u.lastLogin?.toDate ? format(u.lastLogin.toDate(), "d/M/yyyy") : "N/A"}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {u.email !== user?.email && (
-                          <>
-                            <button 
-                              onClick={() => toggleUserLock(u.id, u.isLocked)} 
+                  </tr>
+                ))}
+
+              {activeTab === "users" &&
+                visibleUsers.map((u) => {
+                  const isSelf = u.id === user.uid;
+                  const canTouch = !isSelf && (isSuperAdmin || u.role !== "admin");
+                  return (
+                    <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.role === "user" ? "bg-amber-50/40" : ""}`}>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={u.photoURL || avatarUrl(u.displayName || u.email)}
+                            alt=""
+                            className="w-10 h-10 rounded-full border border-[#E5E1D8]"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="flex flex-col">
+                            <div className="font-bold text-[#2D2A26]">
+                              {u.displayName}
+                              {isSelf && <span className="ml-2 text-[10px] text-[#A19D96]">(bạn)</span>}
+                            </div>
+                            <div className="text-xs text-[#6B665F]">{u.email}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${roleBadge(u.role)}`}>
+                          {ROLE_LABEL[u.role] || u.role}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                            !u.isLocked ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+                          }`}
+                        >
+                          {!u.isLocked ? "Hoạt động" : "Bị khóa"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-[#6B665F]">
+                        {u.lastLogin?.toDate ? format(u.lastLogin.toDate(), "d/M/yyyy") : "N/A"}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        {canTouch && (
+                          <div className="flex items-center justify-end gap-1">
+                            {u.role === "user" && (
+                              <button
+                                onClick={() => setRole(u, "editor")}
+                                disabled={loading}
+                                className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 disabled:opacity-50"
+                                title="Duyệt quyền biên tập"
+                              >
+                                <UserCheck className="w-3.5 h-3.5" /> Duyệt
+                              </button>
+                            )}
+                            {u.role === "editor" && (
+                              <button
+                                onClick={() => setRole(u, "user")}
+                                disabled={loading}
+                                className="p-2 text-[#6B665F] hover:text-amber-600 hover:bg-amber-50 rounded-lg"
+                                title="Thu hồi quyền biên tập"
+                              >
+                                <ShieldOff className="w-4 h-4" />
+                              </button>
+                            )}
+                            {isSuperAdmin && u.role === "editor" && (
+                              <button
+                                onClick={() => setRole(u, "admin")}
+                                disabled={loading}
+                                className="p-2 text-[#6B665F] hover:text-purple-600 hover:bg-purple-50 rounded-lg"
+                                title="Nâng lên quản trị"
+                              >
+                                <ShieldCheck className="w-4 h-4" />
+                              </button>
+                            )}
+                            {isSuperAdmin && u.role === "admin" && (
+                              <button
+                                onClick={() => setRole(u, "editor")}
+                                disabled={loading}
+                                className="p-2 text-[#6B665F] hover:text-amber-600 hover:bg-amber-50 rounded-lg"
+                                title="Hạ xuống biên tập"
+                              >
+                                <ShieldOff className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => toggleLock(u)}
+                              disabled={loading}
                               className={`p-2 rounded-lg transition-all ${
                                 u.isLocked ? "text-emerald-600 hover:bg-emerald-50" : "text-amber-600 hover:bg-amber-50"
                               }`}
-                              title={u.isLocked ? "Mở khóa" : "Khóa"}
+                              title={u.isLocked ? "Mở khóa" : "Khóa tài khoản"}
                             >
                               {u.isLocked ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
                             </button>
-                            <button 
-                              onClick={() => handleDeleteClick(u.id, u.displayName)} 
-                              className="p-2 text-[#6B665F] hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                              title="Xóa người dùng"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </>
+                          </div>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                    </tr>
+                  );
+                })}
+
+              {((activeTab === "members" && members.length === 0) ||
+                (activeTab === "events" && events.length === 0) ||
+                (activeTab === "users" && visibleUsers.length === 0)) && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-sm text-[#A19D96]">
+                    Chưa có dữ liệu.
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
@@ -876,7 +648,7 @@ const Admin: React.FC = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsModalOpen(false)}
+              onClick={closeModal}
               className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60]"
             />
             <motion.div
@@ -890,237 +662,261 @@ const Admin: React.FC = () => {
                   <h2 className="text-2xl font-serif font-bold">
                     {editingItem ? "Chỉnh sửa" : "Thêm mới"} {activeTab === "members" ? "thành viên" : "sự kiện"}
                   </h2>
-                  <button type="button" onClick={() => setIsModalOpen(false)} className="text-[#A19D96] hover:text-[#2D2A26]">
+                  <button type="button" onClick={closeModal} className="text-[#A19D96] hover:text-[#2D2A26]" aria-label="Đóng">
                     <X className="w-6 h-6" />
                   </button>
                 </div>
 
                 <div className="p-8 overflow-y-auto flex-grow">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {activeTab === "members" ? (
-                    <>
-                      <div className="md:col-span-2">
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Hình ảnh đại diện</label>
-                        <div className="flex items-center gap-4">
-                          <div className="w-20 h-20 rounded-full border-2 border-dashed border-[#E5E1D8] flex items-center justify-center overflow-hidden bg-[#FDFCF9]">
-                            {imagePreview ? (
-                              <img src={imagePreview} className="w-full h-full object-cover" alt="Preview" />
-                            ) : (
-                              <Users className="w-8 h-8 text-[#A19D96] opacity-20" />
-                            )}
-                          </div>
-                          <div className="flex-grow">
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleImageChange}
-                              className="hidden"
-                              id="avatar-upload"
-                            />
-                            <label
-                              htmlFor="avatar-upload"
-                              className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-[#E5E1D8] rounded-xl text-sm font-bold text-[#6B665F] cursor-pointer hover:bg-gray-50 transition-all"
-                            >
-                              <Plus className="w-4 h-4" />
-                              Chọn ảnh
-                            </label>
-                            <p className="text-[10px] text-[#A19D96] mt-2">Định dạng: JPG, PNG. Tối đa 1MB.</p>
+                    {activeTab === "members" ? (
+                      <>
+                        <div className="md:col-span-2">
+                          <label className={labelCls}>Hình ảnh đại diện</label>
+                          <div className="flex items-center gap-4">
+                            <div className="relative w-20 h-20 rounded-full border-2 border-dashed border-[#E5E1D8] flex items-center justify-center overflow-hidden bg-[#FDFCF9]">
+                              {imagePreview ? (
+                                <img src={imagePreview} className="w-full h-full object-cover" alt="Xem trước" />
+                              ) : (
+                                <Users className="w-8 h-8 text-[#A19D96] opacity-20" />
+                              )}
+                              {uploading && (
+                                <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
+                                  <div className="w-6 h-6 border-2 border-[#8B2323]/20 border-t-[#8B2323] rounded-full animate-spin" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex-grow">
+                              <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" id="avatar-upload" disabled={uploading} />
+                              <label
+                                htmlFor="avatar-upload"
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-[#E5E1D8] rounded-xl text-sm font-bold text-[#6B665F] cursor-pointer hover:bg-gray-50 transition-all"
+                              >
+                                <Plus className="w-4 h-4" />
+                                {uploading ? "Đang tải lên..." : "Chọn ảnh"}
+                              </label>
+                              <p className="text-[10px] text-[#A19D96] mt-2">JPG, PNG, WebP. Ảnh sẽ được thu nhỏ về 800px và lưu trên máy chủ.</p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Họ và tên</label>
-                        <input
-                          required
-                          type="text"
-                          value={formData.name || ""}
-                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Thế hệ</label>
-                        <select
-                          required
-                          value={formData.generation || 1}
-                          onChange={(e) => setFormData({ ...formData, generation: Number(e.target.value) })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        >
-                          {[...Array(30)].map((_, i) => (
-                            <option key={i + 1} value={i + 1}>
-                              {i + 1}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Giới tính</label>
-                        <select
-                          value={formData.gender || "Nam"}
-                          onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        >
-                          <option value="Nam">Nam</option>
-                          <option value="Nữ">Nữ</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Ngày sinh</label>
-                        <input
-                          type="text"
-                          placeholder="VD: 12/05/1980"
-                          value={formData.birthDate || ""}
-                          onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Trạng thái</label>
-                        <select
-                          value={formData.status || "Alive"}
-                          onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        >
-                          <option value="Alive">Còn sống</option>
-                          <option value="Deceased">Đã mất</option>
-                        </select>
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Nơi sống</label>
-                        <input
-                          type="text"
-                          placeholder="VD: Hà Nội, Việt Nam"
-                          value={formData.address || ""}
-                          onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Người Phối Ngẫu (cách nhau bởi dấu phẩy)</label>
-                        <input
-                          type="text"
-                          placeholder="VD: Nguyễn Thị A, Trần Thị B"
-                          value={formData.spouse || ""}
-                          onChange={(e) => setFormData({ ...formData, spouse: e.target.value })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Tiểu sử</label>
-                        <textarea
-                          rows={3}
-                          value={formData.biography || ""}
-                          onChange={(e) => setFormData({ ...formData, biography: e.target.value })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        />
-                      </div>
+                        <div className="md:col-span-2">
+                          <label className={labelCls}>Họ và tên</label>
+                          <input
+                            required
+                            type="text"
+                            value={formData.name || ""}
+                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                            className={inputCls}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Thế hệ</label>
+                          <select
+                            required
+                            value={formData.generation || 1}
+                            onChange={(e) => setFormData({ ...formData, generation: Number(e.target.value) })}
+                            className={inputCls}
+                          >
+                            {[...Array(30)].map((_, i) => (
+                              <option key={i + 1} value={i + 1}>
+                                {i + 1}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={labelCls}>Giới tính</label>
+                          <select
+                            value={formData.gender || "Nam"}
+                            onChange={(e) => setFormData({ ...formData, gender: e.target.value as FamilyMember["gender"] })}
+                            className={inputCls}
+                          >
+                            <option value="Nam">Nam</option>
+                            <option value="Nữ">Nữ</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className={labelCls}>Ngày sinh</label>
+                          <input
+                            type="text"
+                            placeholder="VD: 12/05/1980"
+                            value={formData.birthDate || ""}
+                            onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+                            className={inputCls}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Trạng thái</label>
+                          <select
+                            value={formData.status || "Alive"}
+                            onChange={(e) => setFormData({ ...formData, status: e.target.value as FamilyMember["status"] })}
+                            className={inputCls}
+                          >
+                            <option value="Alive">Còn sống</option>
+                            <option value="Deceased">Đã mất</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className={labelCls}>Ngày mất</label>
+                          <input
+                            type="text"
+                            placeholder="VD: 20/03/2010 hoặc Kỵ 16-9 ÂL"
+                            value={formData.deathDate || ""}
+                            onChange={(e) => setFormData({ ...formData, deathDate: e.target.value })}
+                            className={inputCls}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Chi tộc</label>
+                          <input
+                            type="text"
+                            placeholder="VD: Chi ông Niệm"
+                            value={formData.branch || ""}
+                            onChange={(e) => setFormData({ ...formData, branch: e.target.value })}
+                            className={inputCls}
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className={labelCls}>Nơi sống</label>
+                          <input
+                            type="text"
+                            placeholder="VD: Hà Nội, Việt Nam"
+                            value={formData.address || ""}
+                            onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                            className={inputCls}
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className={labelCls}>Người phối ngẫu (cách nhau bởi dấu phẩy)</label>
+                          <input
+                            type="text"
+                            placeholder="VD: Nguyễn Thị A, Trần Thị B"
+                            value={formData.spouse || ""}
+                            onChange={(e) => setFormData({ ...formData, spouse: e.target.value })}
+                            className={inputCls}
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className={labelCls}>Tiểu sử</label>
+                          <textarea
+                            rows={3}
+                            value={formData.biography || ""}
+                            onChange={(e) => setFormData({ ...formData, biography: e.target.value })}
+                            className={inputCls}
+                          />
+                        </div>
 
-                      {/* Relationship Fields */}
-                      <div className="md:col-span-2 border-t border-[#E5E1D8] pt-6 mt-2">
-                        <h3 className="text-sm font-bold text-[#8B2323] mb-4">Mối quan hệ gia đình</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div>
-                            <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Cha (Father)</label>
-                            <select
-                              value={formData.fatherId || ""}
-                              onChange={(e) => setFormData({ ...formData, fatherId: e.target.value })}
-                              className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                            >
-                              <option value="">Không có / Chưa rõ</option>
-                              {members
-                                .filter(m => m.id !== editingItem?.id && m.gender === "Nam")
-                                .map(m => (
-                                  <option key={m.id} value={m.id}>{m.name} (Thế hệ {m.generation})</option>
-                                ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Mẹ (Mother)</label>
-                            <select
-                              value={formData.motherId || ""}
-                              onChange={(e) => setFormData({ ...formData, motherId: e.target.value })}
-                              className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                            >
-                              <option value="">Không có / Chưa rõ</option>
-                              {members
-                                .filter(m => m.id !== editingItem?.id && m.gender === "Nữ")
-                                .map(m => (
-                                  <option key={m.id} value={m.id}>{m.name} (Thế hệ {m.generation})</option>
-                                ))}
-                            </select>
+                        <div className="md:col-span-2 border-t border-[#E5E1D8] pt-6 mt-2">
+                          <h3 className="text-sm font-bold text-[#8B2323] mb-4">Mối quan hệ gia đình</h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                              <label className={labelCls}>Cha</label>
+                              <select
+                                value={formData.fatherId || ""}
+                                onChange={(e) => setFormData({ ...formData, fatherId: e.target.value })}
+                                className={inputCls}
+                              >
+                                <option value="">Không có / Chưa rõ</option>
+                                {members
+                                  .filter((m) => m.id !== editingItem?.id && m.gender === "Nam")
+                                  .map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                      {m.name} (Thế hệ {m.generation})
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className={labelCls}>Mẹ</label>
+                              <select
+                                value={formData.motherId || ""}
+                                onChange={(e) => setFormData({ ...formData, motherId: e.target.value })}
+                                className={inputCls}
+                              >
+                                <option value="">Không có / Chưa rõ</option>
+                                {members
+                                  .filter((m) => m.id !== editingItem?.id && m.gender === "Nữ")
+                                  .map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                      {m.name} (Thế hệ {m.generation})
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="md:col-span-2">
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Tiêu đề sự kiện</label>
-                        <input
-                          required
-                          type="text"
-                          value={formData.title || ""}
-                          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Thời gian</label>
-                        <input
-                          required
-                          type="datetime-local"
-                          value={formData.date ? formData.date.slice(0, 16) : ""}
-                          onChange={(e) => setFormData({ ...formData, date: new Date(e.target.value).toISOString() })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Loại sự kiện</label>
-                        <select
-                          value={formData.type || "Kỵ nhật"}
-                          onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        >
-                          <option value="Kỵ nhật">Kỵ nhật</option>
-                          <option value="Hội họp">Hội họp</option>
-                          <option value="Khác">Khác</option>
-                        </select>
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Địa điểm</label>
-                        <input
-                          type="text"
-                          value={formData.location || ""}
-                          onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-xs font-bold uppercase text-[#A19D96] mb-2">Mô tả</label>
-                        <textarea
-                          rows={3}
-                          value={formData.description || ""}
-                          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                          className="w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
-                        />
-                      </div>
-                    </>
-                  )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="md:col-span-2">
+                          <label className={labelCls}>Tiêu đề sự kiện</label>
+                          <input
+                            required
+                            type="text"
+                            value={formData.title || ""}
+                            onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                            className={inputCls}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Thời gian</label>
+                          <input
+                            required
+                            type="datetime-local"
+                            value={formData.date ? format(new Date(formData.date), "yyyy-MM-dd'T'HH:mm") : ""}
+                            onChange={(e) =>
+                              setFormData({ ...formData, date: e.target.value ? new Date(e.target.value).toISOString() : "" })
+                            }
+                            className={inputCls}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Loại sự kiện</label>
+                          <select
+                            value={formData.type || "Kỵ nhật"}
+                            onChange={(e) => setFormData({ ...formData, type: e.target.value as FamilyEvent["type"] })}
+                            className={inputCls}
+                          >
+                            <option value="Kỵ nhật">Kỵ nhật</option>
+                            <option value="Hội họp">Hội họp</option>
+                            <option value="Khác">Khác</option>
+                          </select>
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className={labelCls}>Địa điểm</label>
+                          <input
+                            type="text"
+                            value={formData.location || ""}
+                            onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                            className={inputCls}
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className={labelCls}>Mô tả</label>
+                          <textarea
+                            rows={3}
+                            value={formData.description || ""}
+                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                            className={inputCls}
+                          />
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
                 <div className="p-6 pt-4 border-t border-[#E5E1D8] flex gap-4 bg-[#FDFCF9] sticky bottom-0 z-20">
                   <button
                     type="button"
-                    onClick={() => setIsModalOpen(false)}
+                    onClick={closeModal}
                     className="flex-grow py-3 px-4 bg-gray-100 text-gray-600 rounded-2xl font-bold hover:bg-gray-200 transition-colors"
                   >
                     Hủy
                   </button>
                   <button
                     type="submit"
-                    disabled={loading}
-                    className="flex-grow py-3 px-4 bg-[#8B2323] text-white rounded-2xl font-bold hover:bg-[#6B1B1B] transition-colors shadow-lg shadow-[#8B2323]/20 flex items-center justify-center gap-2"
+                    disabled={loading || uploading}
+                    className="flex-grow py-3 px-4 bg-[#8B2323] text-white rounded-2xl font-bold hover:bg-[#6B1B1B] transition-colors shadow-lg shadow-[#8B2323]/20 flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     {loading ? (
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1135,8 +931,9 @@ const Admin: React.FC = () => {
           </>
         )}
       </AnimatePresence>
-      {/* Delete Confirmation Modal */}
-      {isDeleteModalOpen && (
+
+      {/* Delete confirm */}
+      {itemToDelete && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -1148,12 +945,11 @@ const Admin: React.FC = () => {
             </div>
             <h3 className="text-2xl font-serif font-bold text-[#2D2A26] text-center mb-2">Xác nhận xóa</h3>
             <p className="text-[#6B665F] text-center mb-8">
-              Bạn có chắc chắn muốn xóa <span className="font-bold text-[#2D2A26]">"{itemToDelete?.name}"</span>? 
-              Hành động này không thể hoàn tác.
+              Bạn có chắc chắn muốn xóa <span className="font-bold text-[#2D2A26]">"{itemToDelete.name}"</span>? Hành động này không thể hoàn tác.
             </p>
             <div className="grid grid-cols-2 gap-4">
               <button
-                onClick={() => setIsDeleteModalOpen(false)}
+                onClick={() => setItemToDelete(null)}
                 className="py-3 px-6 bg-[#FDFCF9] border border-[#E5E1D8] text-[#6B665F] font-bold rounded-2xl hover:bg-white transition-all"
               >
                 Hủy bỏ
@@ -1161,9 +957,44 @@ const Admin: React.FC = () => {
               <button
                 onClick={confirmDelete}
                 disabled={loading}
-                className="py-3 px-6 bg-red-600 text-white font-bold rounded-2xl hover:bg-red-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                className="py-3 px-6 bg-red-600 text-white font-bold rounded-2xl hover:bg-red-700 transition-all disabled:opacity-50"
               >
                 {loading ? "Đang xóa..." : "Xác nhận xóa"}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Seed confirm */}
+      {showSeedConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-[32px] p-8 max-w-md w-full shadow-2xl border border-[#E5E1D8]"
+          >
+            <div className="w-16 h-16 bg-[#FDFCF9] rounded-2xl flex items-center justify-center text-[#8B2323] mb-6 mx-auto">
+              <Download className="w-8 h-8" />
+            </div>
+            <h3 className="text-2xl font-serif font-bold text-[#2D2A26] text-center mb-2">Nạp dữ liệu gốc</h3>
+            <p className="text-[#6B665F] text-center mb-8 text-sm">
+              Sẽ ghi {SEED_MEMBERS.length} thành viên (22 đời) vào hệ thống theo id cố định. Thành viên trùng id sẽ được
+              cập nhật các trường có trong dữ liệu gốc, các trường khác (ảnh, địa chỉ bạn đã nhập) được giữ nguyên.
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <button
+                onClick={() => setShowSeedConfirm(false)}
+                className="py-3 px-6 bg-[#FDFCF9] border border-[#E5E1D8] text-[#6B665F] font-bold rounded-2xl hover:bg-white transition-all"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                onClick={importSeedData}
+                disabled={loading}
+                className="py-3 px-6 bg-[#8B2323] text-white font-bold rounded-2xl hover:bg-[#6B1B1B] transition-all disabled:opacity-50"
+              >
+                {loading ? "Đang nạp..." : "Nạp dữ liệu"}
               </button>
             </div>
           </motion.div>

@@ -7,20 +7,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Calendar as CalendarIcon, MapPin, Clock, Info, ChevronRight, X } from "lucide-react";
 import { format, isSameDay, parseISO } from "date-fns";
 import { vi } from "date-fns/locale";
-
-interface FamilyEvent {
-  id: string;
-  title: string;
-  date: string;
-  location?: string;
-  description?: string;
-  type: "Kỵ nhật" | "Hội họp" | "Khác";
-  memberId?: string;
-}
+import type { FamilyEvent } from "../types";
+import { downloadIcs } from "../lib/ics";
 
 const Events: React.FC = () => {
   const [events, setEvents] = useState<FamilyEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedEvent, setSelectedEvent] = useState<FamilyEvent | null>(null);
 
@@ -30,8 +23,9 @@ const Events: React.FC = () => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FamilyEvent));
       setEvents(data);
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, "events");
+    }, (err) => {
+      setError(handleFirestoreError(err, OperationType.LIST, "events"));
+      setLoading(false);
     });
     return () => unsubscribe();
   }, []);
@@ -50,6 +44,9 @@ const Events: React.FC = () => {
 
   return (
     <div className="space-y-12">
+      {error && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-100 text-red-700 text-sm font-medium">{error}</div>
+      )}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h1 className="font-serif text-4xl font-bold mb-2">Sự kiện Gia đình</h1>
@@ -247,8 +244,11 @@ const Events: React.FC = () => {
                 </div>
 
                 <div className="mt-8 pt-8 border-t border-[#E5E1D8]">
-                  <button className="w-full py-4 bg-[#8B2323] text-white rounded-2xl font-bold hover:bg-[#6B1B1B] transition-colors shadow-lg shadow-[#8B2323]/20">
-                    Thêm vào lịch cá nhân
+                  <button
+                    onClick={() => downloadIcs(selectedEvent)}
+                    className="w-full py-4 bg-[#8B2323] text-white rounded-2xl font-bold hover:bg-[#6B1B1B] transition-colors shadow-lg shadow-[#8B2323]/20"
+                  >
+                    Thêm vào lịch cá nhân (.ics)
                   </button>
                 </div>
               </div>

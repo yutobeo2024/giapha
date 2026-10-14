@@ -1,96 +1,36 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  LayoutDashboard, 
-  Network, 
-  Users, 
-  Calendar, 
-  Settings, 
-  LogIn, 
-  LogOut, 
-  Menu, 
-  X, 
+import {
+  LayoutDashboard,
+  Network,
+  Users,
+  Calendar,
+  Settings,
+  LogIn,
+  LogOut,
+  Menu,
+  X,
   ChevronRight,
-  AlertTriangle
+  AlertTriangle,
+  Clock,
 } from "lucide-react";
-import { auth } from "../firebase";
-import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase";
+import { useAuthContext } from "../hooks/AuthContext";
+import { avatarUrl } from "../lib/avatar";
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [userRole, setUserRole] = useState<string>("user");
-  const [isLocked, setIsLocked] = useState(false);
+  const { user, role, isEditor, lockedNotice, dismissLockedNotice, login, logout } = useAuthContext();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        // Check if user exists in Firestore, if not create them
-        const userRef = doc(db, "users", currentUser.uid);
-        const userSnap = await getDoc(userRef);
-        
-        if (!userSnap.exists()) {
-          const defaultRole = currentUser.email?.toLowerCase().trim() === "hanhtoami@gmail.com" ? "admin" : "user";
-          await setDoc(userRef, {
-            email: currentUser.email,
-            displayName: currentUser.displayName,
-            photoURL: currentUser.photoURL,
-            role: defaultRole,
-            isLocked: false,
-            createdAt: serverTimestamp(),
-            lastLogin: serverTimestamp()
-          });
-          setUserRole(defaultRole);
-        } else {
-          const userData = userSnap.data();
-          if (userData.isLocked) {
-            setIsLocked(true);
-            await signOut(auth);
-            setUser(null);
-            setUserRole("user");
-            return;
-          }
-          setUserRole(userData.role || "user");
-          await setDoc(userRef, { 
-            lastLogin: serverTimestamp(),
-            photoURL: currentUser.photoURL,
-            displayName: currentUser.displayName
-          }, { merge: true });
-        }
-      } else {
-        setUserRole("user");
-      }
-      setUser(currentUser);
-      setIsLocked(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const handleLogin = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Login failed:", error);
-    }
-  };
-
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      navigate("/");
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
+    await logout();
+    navigate("/");
   };
 
   const navItems = [
@@ -98,14 +38,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: "Danh sách", path: "/members", icon: Users },
     { name: "Cây gia phả", path: "/tree", icon: Network },
     { name: "Sự kiện", path: "/events", icon: Calendar },
-    { name: "Quản trị", path: "/admin", icon: Settings, adminOnly: true },
+    { name: "Quản trị", path: "/admin", icon: Settings, editorOnly: true },
   ];
 
-  const isAdmin = () => {
-    return userRole === "admin" || user?.email?.toLowerCase().trim() === "hanhtoami@gmail.com";
-  };
-
-  const filteredNavItems = navItems.filter(item => !item.adminOnly || isAdmin());
+  const filteredNavItems = navItems.filter((item) => !item.editorOnly || isEditor);
+  const userAvatar = user?.photoURL || avatarUrl(user?.displayName || user?.email || "?");
+  const isPending = !!user && role === "user";
 
   return (
     <div className="min-h-screen bg-[#FDFCF9] text-[#2D2A26] font-sans">
@@ -140,14 +78,19 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               ))}
               {user ? (
                 <div className="flex items-center gap-4 pl-4 border-l border-[#E5E1D8]">
-                  <img src={user.photoURL || ""} alt={user.displayName || ""} className="w-8 h-8 rounded-full border border-[#E5E1D8]" />
-                  <button onClick={handleLogout} className="text-[#6B665F] hover:text-[#8B2323] transition-colors">
+                  <img
+                    src={userAvatar}
+                    alt={user.displayName || ""}
+                    className="w-8 h-8 rounded-full border border-[#E5E1D8]"
+                    referrerPolicy="no-referrer"
+                  />
+                  <button onClick={handleLogout} className="text-[#6B665F] hover:text-[#8B2323] transition-colors" title="Đăng xuất">
                     <LogOut className="w-5 h-5" />
                   </button>
                 </div>
               ) : (
                 <button
-                  onClick={handleLogin}
+                  onClick={login}
                   className="flex items-center gap-2 px-4 py-2 bg-[#8B2323] text-white rounded-full text-sm font-medium hover:bg-[#6B1B1B] transition-colors"
                 >
                   <LogIn className="w-4 h-4" />
@@ -158,12 +101,24 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             {/* Mobile Menu Button */}
             <div className="md:hidden flex items-center">
-              <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-[#2D2A26]">
+              <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-[#2D2A26]" aria-label="Menu">
                 {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
               </button>
             </div>
           </div>
         </div>
+
+        {/* Pending approval banner */}
+        {isPending && (
+          <div className="bg-amber-50 border-t border-amber-200 text-amber-800 text-xs sm:text-sm">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex items-center gap-2">
+              <Clock className="w-4 h-4 shrink-0" />
+              <span>
+                Tài khoản của bạn đang <strong>chờ quản trị viên duyệt</strong> quyền chỉnh sửa. Bạn vẫn có thể xem toàn bộ gia phả.
+              </span>
+            </div>
+          </div>
+        )}
       </nav>
 
       {/* Mobile Navigation Drawer */}
@@ -186,7 +141,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             >
               <div className="flex justify-between items-center mb-8">
                 <span className="font-serif text-lg font-bold">Menu</span>
-                <button onClick={() => setIsMenuOpen(false)}>
+                <button onClick={() => setIsMenuOpen(false)} aria-label="Đóng">
                   <X className="w-6 h-6" />
                 </button>
               </div>
@@ -212,19 +167,19 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 {user ? (
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <img src={user.photoURL || ""} alt={user.displayName || ""} className="w-10 h-10 rounded-full" />
+                      <img src={userAvatar} alt={user.displayName || ""} className="w-10 h-10 rounded-full" referrerPolicy="no-referrer" />
                       <div className="flex flex-col">
                         <span className="text-sm font-bold truncate max-w-[120px]">{user.displayName}</span>
                         <span className="text-xs text-[#6B665F] truncate max-w-[120px]">{user.email}</span>
                       </div>
                     </div>
-                    <button onClick={handleLogout} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                    <button onClick={handleLogout} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Đăng xuất">
                       <LogOut className="w-5 h-5" />
                     </button>
                   </div>
                 ) : (
                   <button
-                    onClick={handleLogin}
+                    onClick={login}
                     className="w-full flex items-center justify-center gap-2 py-3 bg-[#8B2323] text-white rounded-xl font-medium"
                   >
                     <LogIn className="w-5 h-5" />
@@ -239,7 +194,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
       {/* Locked Account Message */}
       <AnimatePresence>
-        {isLocked && (
+        {lockedNotice && (
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -251,7 +206,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <h4 className="font-bold text-red-900">Tài khoản bị khóa</h4>
               <p className="text-sm text-red-700">Vui lòng liên hệ quản trị viên để biết thêm chi tiết.</p>
             </div>
-            <button onClick={() => setIsLocked(false)} className="ml-auto p-1 hover:bg-red-100 rounded-lg">
+            <button onClick={dismissLockedNotice} className="ml-auto p-1 hover:bg-red-100 rounded-lg" aria-label="Đóng">
               <X className="w-4 h-4 text-red-600" />
             </button>
           </motion.div>
