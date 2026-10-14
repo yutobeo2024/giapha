@@ -7,3 +7,10 @@ export const SUPER_ADMIN_EMAIL = "hanhtoami@gmail.com";
 
 export const isSuperAdminEmail = (email: string | null | undefined) =>
   !!email && email.toLowerCase().trim() === SUPER_ADMIN_EMAIL;
+
+/**
+ * Domain chính thức của site. Firebase Auth luôn dùng domain này làm authDomain
+ * (qua proxy /__/auth của Cloudflare Pages) dù người dùng vào bằng www, pages.dev
+ * hay địa chỉ xem trước, để redirect_uri luôn khớp với OAuth client đã khai báo.
+ */
+export const CANONICAL_AUTH_DOMAIN = "giaphanguyennhuan.com";
