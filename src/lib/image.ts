@@ -61,3 +61,22 @@ export async function uploadPhoto(file: File, user: User): Promise<string> {
   const data = (await res.json()) as { url: string };
   return data.url;
 }
+
+/**
+ * Tải nhạc nền (chỉ admin) lên R2 qua /api/media. Không nén lại, giữ nguyên file.
+ * Trả về đường dẫn "/api/photos/audio/<key>".
+ */
+export async function uploadMedia(file: File, user: User): Promise<{ url: string; name: string; size: number }> {
+  if (!file.type.startsWith("audio/")) throw new Error("Tệp không phải nhạc.");
+  if (file.size > 15 * 1024 * 1024) throw new Error("Tệp nhạc quá lớn (tối đa 15MB).");
+  const token = await user.getIdToken();
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await fetch("/api/media", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as { error?: string } | null;
+    if (res.status === 403) throw new Error(data?.error || "Chỉ quản trị viên được tải nhạc.");
+    throw new Error(data?.error || `Tải nhạc thất bại (${res.status}).`);
+  }
+  return (await res.json()) as { url: string; name: string; size: number };
+}

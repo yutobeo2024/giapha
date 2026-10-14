@@ -88,3 +88,8 @@ export function requireEditor(caller: Caller): void {
     throw new AuthError(403, "Tài khoản chưa được duyệt quyền chỉnh sửa.");
   }
 }
+
+export function requireAdmin(caller: Caller): void {
+  if (caller.isLocked) throw new AuthError(403, "Tài khoản đã bị khóa.");
+  if (caller.role !== "admin") throw new AuthError(403, "Chỉ quản trị viên được thực hiện.");
+}

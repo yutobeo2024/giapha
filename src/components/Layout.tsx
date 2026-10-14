@@ -14,6 +14,7 @@ import {
   ChevronRight,
   AlertTriangle,
   Clock,
+  Sparkles,
 } from "lucide-react";
 import { useAuthContext } from "../hooks/AuthContext";
 import { avatarUrl } from "../lib/avatar";
@@ -35,6 +36,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const navItems = [
     { name: "Tổng quan", path: "/", icon: LayoutDashboard },
+    { name: "Giới thiệu", path: "/gioi-thieu", icon: Sparkles },
     { name: "Danh sách", path: "/members", icon: Users },
     { name: "Cây gia phả", path: "/tree", icon: Network },
     { name: "Sự kiện", path: "/events", icon: Calendar },
@@ -44,11 +46,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const filteredNavItems = navItems.filter((item) => !item.editorOnly || isEditor);
   const userAvatar = user?.photoURL || avatarUrl(user?.displayName || user?.email || "?");
   const isPending = !!user && role === "user";
+  // Trang 3D chiếm trọn màn hình: menu nền tối trong suốt, không khung nội dung, không footer
+  const immersive = location.pathname === "/gioi-thieu";
 
   return (
-    <div className="min-h-screen bg-[#FDFCF9] text-[#2D2A26] font-sans">
+    <div className={`min-h-screen font-sans ${immersive ? "bg-[#0b0a12] text-[#f5ead6]" : "bg-[#FDFCF9] text-[#2D2A26]"}`}>
       {/* Navigation Bar */}
-      <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-[#E5E1D8]">
+      <nav
+        className={`top-0 z-50 backdrop-blur-md border-b ${
+          immersive ? "fixed inset-x-0 bg-[#0b0a12]/40 border-white/10" : "sticky bg-white/80 border-[#E5E1D8]"
+        }`}
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
             <div className="flex items-center gap-3">
@@ -56,7 +64,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <div className="w-10 h-10 bg-[#8B2323] rounded-full flex items-center justify-center text-white font-serif text-xl">
                   N
                 </div>
-                <span className="font-serif text-xl font-bold tracking-tight hidden sm:block">
+                <span className={`font-serif text-xl font-bold tracking-tight hidden sm:block ${immersive ? "text-[#fff3d6]" : ""}`}>
                   Nguyễn Nhuận
                 </span>
               </Link>
@@ -69,7 +77,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   key={item.path}
                   to={item.path}
                   className={`flex items-center gap-2 text-sm font-medium transition-colors ${
-                    location.pathname === item.path ? "text-[#8B2323]" : "text-[#6B665F] hover:text-[#2D2A26]"
+                    location.pathname === item.path
+                      ? immersive
+                        ? "text-[#f6c35b]"
+                        : "text-[#8B2323]"
+                      : immersive
+                        ? "text-[#f5ead6]/70 hover:text-white"
+                        : "text-[#6B665F] hover:text-[#2D2A26]"
                   }`}
                 >
                   <item.icon className="w-4 h-4" />
@@ -77,14 +91,18 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 </Link>
               ))}
               {user ? (
-                <div className="flex items-center gap-4 pl-4 border-l border-[#E5E1D8]">
+                <div className={`flex items-center gap-4 pl-4 border-l ${immersive ? "border-white/15" : "border-[#E5E1D8]"}`}>
                   <img
                     src={userAvatar}
                     alt={user.displayName || ""}
                     className="w-8 h-8 rounded-full border border-[#E5E1D8]"
                     referrerPolicy="no-referrer"
                   />
-                  <button onClick={handleLogout} className="text-[#6B665F] hover:text-[#8B2323] transition-colors" title="Đăng xuất">
+                  <button
+                    onClick={handleLogout}
+                    className={`transition-colors ${immersive ? "text-[#f5ead6]/70 hover:text-white" : "text-[#6B665F] hover:text-[#8B2323]"}`}
+                    title="Đăng xuất"
+                  >
                     <LogOut className="w-5 h-5" />
                   </button>
                 </div>
@@ -101,7 +119,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             {/* Mobile Menu Button */}
             <div className="md:hidden flex items-center">
-              <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-[#2D2A26]" aria-label="Menu">
+              <button onClick={() => setIsMenuOpen(!isMenuOpen)} className={immersive ? "text-[#f5ead6]" : "text-[#2D2A26]"} aria-label="Menu">
                 {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
               </button>
             </div>
@@ -137,7 +155,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 bottom-0 w-72 bg-white z-50 shadow-2xl p-6 flex flex-col"
+              className="fixed right-0 top-0 bottom-0 w-72 bg-white text-[#2D2A26] z-50 shadow-2xl p-6 flex flex-col"
             >
               <div className="flex justify-between items-center mb-8">
                 <span className="font-serif text-lg font-bold">Menu</span>
@@ -214,18 +232,24 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       </AnimatePresence>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <motion.div
-          key={location.pathname}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
-          {children}
-        </motion.div>
-      </main>
+      {immersive ? (
+        // Không bọc trong motion.div: transform sẽ phá vị trí fixed của cảnh 3D
+        <main>{children}</main>
+      ) : (
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            {children}
+          </motion.div>
+        </main>
+      )}
 
       {/* Footer */}
+      {!immersive && (
       <footer className="bg-white border-t border-[#E5E1D8] py-12 mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <div className="w-12 h-12 bg-[#8B2323] rounded-full flex items-center justify-center text-white font-serif text-2xl mx-auto mb-4">
@@ -240,6 +264,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </div>
         </div>
       </footer>
+      )}
     </div>
   );
 };

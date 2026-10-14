@@ -12,7 +12,8 @@ import {
   Quote,
   ShieldCheck,
   HeartPulse,
-  Search
+  Search,
+  Sparkles
 } from "lucide-react";
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
@@ -129,6 +130,13 @@ const Dashboard: React.FC = () => {
               Dòng họ luôn chú trọng việc bảo tồn giá trị truyền thống, tôn tạo lăng mộ và nhà thờ tổ tiên trang nghiêm. Đây là nền tảng vững chắc để con cháu luôn nhớ về cội nguồn, nỗ lực học tập và rèn luyện bản thân để xứng đáng với công lao của các bậc tiền nhân.
             </p>
           </div>
+          <Link
+            to="/gioi-thieu"
+            className="inline-flex items-center gap-2 mt-8 px-6 py-3 rounded-full bg-[#8B2323] text-white font-bold text-sm shadow-lg shadow-[#8B2323]/25 hover:bg-[#6B1B1B] transition-colors"
+          >
+            <Sparkles className="w-4 h-4" />
+            Xem hành trình dòng họ 3D
+          </Link>
         </div>
 
         <div className="absolute bottom-12 right-12 hidden lg:block">

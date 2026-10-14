@@ -92,6 +92,12 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ---------------- settings (cấu hình site, ví dụ nhạc nền trang Giới thiệu) ----------------
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // ---------------- users ----------------
     match /users/{userId} {
       // Chính chủ đọc hồ sơ mình; admin đọc/list tất cả để duyệt.
