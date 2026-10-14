@@ -21,6 +21,8 @@ export default function Glow({
   reduced: boolean;
 }) {
   const warm = useMemo(() => glowTexture("warm"), []);
+  const heartRef = useRef<THREE.SpriteMaterial>(null);
+  const heart = useMemo(() => layout.nodes.find((n) => n.isRoot), [layout]);
   const cool = useMemo(() => glowTexture("cool"), []);
   const normalRef = useRef<THREE.PointsMaterial>(null);
   const aliveRef = useRef<THREE.PointsMaterial>(null);
@@ -33,7 +35,7 @@ export default function Glow({
     const h: number[] = [];
     for (const node of layout.nodes) {
       const target = highlightIds.has(node.member.id) ? h : isAlive(node.member) ? a : n;
-      target.push(node.position[0], node.position[1] - (isAlive(node.member) ? 0.22 : 0), node.position[2]);
+      target.push(node.position[0], node.position[1] - (isAlive(node.member) ? 0.55 : 0), node.position[2]);
     }
     return { normal: new Float32Array(n), alive: new Float32Array(a), hi: new Float32Array(h) };
   }, [layout, highlightIds]);
@@ -69,6 +71,7 @@ export default function Glow({
     const g = growth.current;
     const t = state.clock.elapsedTime;
     if (normalRef.current) normalRef.current.opacity = 0.42 * g;
+    if (heartRef.current) heartRef.current.opacity = 0.55 * g * (reduced ? 1 : 0.9 + 0.1 * Math.sin(t * 0.9));
     if (aliveRef.current) aliveRef.current.opacity = 0.6 * g * (reduced ? 1 : 0.85 + 0.15 * Math.sin(t * 1.6));
     if (hiRef.current) hiRef.current.opacity = 0.9 * g * (reduced ? 1 : 0.85 + 0.15 * Math.sin(t * 2.2));
     if (leafRef.current) {
@@ -80,6 +83,11 @@ export default function Glow({
   const common = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, sizeAttenuation: true } as const;
   return (
     <>
+      {heart && (
+        <sprite position={[heart.position[0], heart.position[1] + 0.3, heart.position[2]]} scale={layout.trunk.topRadius * 5.2} renderOrder={3}>
+          <spriteMaterial ref={heartRef} map={warm} transparent depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} color="#ffb850" opacity={0} />
+        </sprite>
+      )}
       <points key={`n${normal.length}`}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[normal, 3]} />
