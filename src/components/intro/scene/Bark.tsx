@@ -54,7 +54,7 @@ function chainTube(chain: LayoutChain, quality: Quality): THREE.BufferGeometry {
   const around = Math.max(1, Math.round((2 * Math.PI * avgR) / TEX_LEN));
   const along = length / TEX_LEN;
   const uOff = (chain.id.length * 0.37) % 1;
-  const gnarl = chain.kind === "trunk" ? 0.07 : chain.kind === "buttress" ? 0.1 : 0;
+  const gnarl = chain.kind === "trunk" ? 0.07 : 0;
   for (let i = 0; i <= tubular; i++) {
     const t = i / tubular;
     const center = curve.getPointAt(t);

@@ -77,16 +77,15 @@ export default function ExploreControls({ layout, handoff, fly, reduced, onNearb
       const dist = n.isRoot ? Math.max(6, layout.trunk.topRadius * 5) : 3.6;
       toPos.copy(toT).addScaledVector(out, dist).add(new THREE.Vector3(0, dist * 0.3, 0));
     } else if (fly.gen != null) {
+      // Nhìn từ trên cao xuống vòng của đời đó, lùi đủ xa để cả vòng (kèm nhãn) lọt trong khung
       const g = fly.gen;
-      if (g === layout.minGen) {
-        toT.set(0, (layout.groundY + layout.trunk.topY) / 2 + 0.5, 0);
-        const dist = Math.max(10, layout.trunk.rootSpread * 2.1);
-        toPos.copy(toT).addScaledVector(camDir, dist).add(new THREE.Vector3(0, dist * 0.22, 0));
-      } else {
-        toT.set(0, layout.heightOf(g), 0);
-        const dist = Math.max(7, layout.spreadOf(g) * 2.3 + 2);
-        toPos.copy(toT).addScaledVector(camDir, dist).add(new THREE.Vector3(0, dist * 0.3, 0));
-      }
+      const ring = g === layout.minGen ? layout.trunk.topRadius : layout.spreadOf(g);
+      toT.set(0, g === layout.minGen ? layout.trunk.topY : layout.heightOf(g), 0);
+      const vhalf = THREE.MathUtils.degToRad(camera.fov) / 2;
+      const hhalf = Math.atan(Math.tan(vhalf) * camera.aspect);
+      const dist = THREE.MathUtils.clamp(((ring + 2.2) / Math.tan(Math.min(vhalf, hhalf))) * 1.08, 8, 74);
+      // hơi nghiêng khỏi trục đứng để OrbitControls không khoá hướng
+      toPos.copy(toT).add(new THREE.Vector3(0, dist, 0)).addScaledVector(camDir, dist * 0.12);
     } else return;
 
     f.fromPos.copy(camera.position);

@@ -96,6 +96,9 @@
 }
 .intro-label-name { font-family: "Playfair Display", Georgia, serif; font-size: 13px; font-weight: 700; color: #fff0c8; }
 .intro-label-gen { font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(246, 195, 91, 0.85); }
+.intro-label-compact { padding: 2px 7px; gap: 0; }
+.intro-label-compact .intro-label-name { font-size: 10px; }
+.intro-label-compact .intro-label-gen { display: none; }
 .intro-label-alive { border-color: rgba(127, 240, 184, 0.55); box-shadow: 0 0 18px rgba(127, 240, 184, 0.3); }
 .intro-label-alive .intro-label-name { color: #dafff0; }
 .intro-label-alive .intro-label-gen { color: rgba(127, 240, 184, 0.9); }

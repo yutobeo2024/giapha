@@ -168,9 +168,9 @@ export function barkTextures(size = 256): { map: THREE.Texture; normalMap: THREE
   const mapC = image((x, y, o) => {
     const t = Math.pow(h[y * size + x], 1.1);
     const speck = (n3((x + 13) / size, (y + 7) / size) - 0.5) * 14;
-    o[0] = clamp255(64 + 60 * t + speck);
-    o[1] = clamp255(41 + 38 * t + speck * 0.8);
-    o[2] = clamp255(26 + 20 * t + speck * 0.6);
+    o[0] = clamp255(42 + 64 * t + speck);
+    o[1] = clamp255(29 + 46 * t + speck * 0.85);
+    o[2] = clamp255(19 + 30 * t + speck * 0.7);
   });
   const strength = 2.8;
   const normalC = image((x, y, o) => {

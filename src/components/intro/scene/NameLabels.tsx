@@ -10,6 +10,8 @@ export default function NameLabels({ layout, ids }: { layout: TreeLayout; ids: s
   const refs = useRef(new Map<string, HTMLDivElement>());
   const camera = useThree((st) => st.camera);
   const size = useThree((st) => st.size);
+  // Hiện nhiều nhãn trên màn hẹp: thu gọn để xếp đủ
+  const compact = ids.length > 8 && size.width < 700;
   const v = useMemo(() => new THREE.Vector3(), []);
 
   useFrame(() => {
@@ -23,18 +25,22 @@ export default function NameLabels({ layout, ids }: { layout: TreeLayout; ids: s
       const y = (-v.y * 0.5 + 0.5) * size.height;
       const w = el.offsetWidth || 120;
       const h = el.offsetHeight || 34;
-      let chosen: number | null = null;
-      for (const dy of [0, -h - 6, h + 22, -2 * h - 12, 2 * h + 28]) {
-        const box = { x0: x - w / 2, x1: x + w / 2, y0: y - h - 14 + dy, y1: y - 14 + dy };
+      let chosen: [number, number] | null = null;
+      const tries: [number, number][] = [
+        [0, 0], [0, -h - 6], [0, h + 22], [-w * 0.62, -h / 2 - 2], [w * 0.62, -h / 2 - 2],
+        [-w * 0.62, h / 2 + 16], [w * 0.62, h / 2 + 16], [0, -2 * h - 12], [0, 2 * h + 28],
+      ];
+      for (const [dx, dy] of tries) {
+        const box = { x0: x - w / 2 + dx, x1: x + w / 2 + dx, y0: y - h - 14 + dy, y1: y - 14 + dy };
         if (!placed.some((b) => box.x0 < b.x1 + 4 && box.x1 > b.x0 - 4 && box.y0 < b.y1 + 4 && box.y1 > b.y0 - 4)) {
           placed.push(box);
-          chosen = dy;
+          chosen = [dx, dy];
           break;
         }
       }
       const behind = v.z > 1;
       el.style.opacity = chosen === null || behind ? "0" : "1";
-      el.style.transform = `translate(-50%, calc(-100% - 14px + ${chosen ?? 0}px))`;
+      el.style.transform = `translate(calc(-50% + ${chosen?.[0] ?? 0}px), calc(-100% - 14px + ${chosen?.[1] ?? 0}px))`;
     });
   });
 
@@ -50,7 +56,7 @@ export default function NameLabels({ layout, ids }: { layout: TreeLayout; ids: s
                 if (el) refs.current.set(id, el);
                 else refs.current.delete(id);
               }}
-              className={`intro-label ${isAlive(n.member) ? "intro-label-alive" : ""}`}
+              className={`intro-label ${isAlive(n.member) ? "intro-label-alive" : ""} ${compact ? "intro-label-compact" : ""}`}
               style={{ position: "absolute", left: 0, top: 0, transition: "opacity .25s" }}
             >
               <span className="intro-label-name">{n.member.name}</span>
