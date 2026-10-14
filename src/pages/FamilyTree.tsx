@@ -7,35 +7,17 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { useSearchParams } from "react-router-dom";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
+import type { FamilyMember } from "../types";
+import { avatarUrl } from "../lib/avatar";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-interface FamilyMember {
-  id: string;
-  name: string;
-  birthDate?: string;
-  deathDate?: string;
-  gender: "Nam" | "Nữ";
-  generation: number;
-  branch?: string;
-  role?: string;
-  biography?: string;
-  fatherId?: string;
-  motherId?: string;
-  spouseId?: string;
-  spouse?: string;
-  address?: string;
-  photoUrl?: string;
-  status?: "Alive" | "Deceased";
-}
-
 const FamilyTree: React.FC = () => {
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
@@ -58,11 +40,15 @@ const FamilyTree: React.FC = () => {
       }
       
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, "members");
+    }, (err) => {
+      setError(handleFirestoreError(err, OperationType.LIST, "members"));
+      setLoading(false);
     });
     return () => unsubscribe();
   }, [highlightId]);
+
+  // Gốc cây: thành viên không có cha lẫn mẹ (bất kể đời), để nhánh chưa nối vẫn hiển thị.
+  const roots = members.filter(m => !m.fatherId && !m.motherId);
 
   const filteredMembers = members.filter(m => {
     return m.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -87,8 +73,10 @@ const FamilyTree: React.FC = () => {
     
     setExporting(true);
     try {
+      // Tải thư viện xuất PDF khi cần (~400KB) thay vì nhúng vào bundle chính
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
       const element = treeRef.current;
-      
+
       // Use html2canvas to capture the tree with a balanced resolution
       // Scale 2.5 is a good compromise between clarity and memory usage
       const canvas = await html2canvas(element, {
@@ -174,7 +162,7 @@ const FamilyTree: React.FC = () => {
           <div className="flex flex-col items-center gap-1.5">
             <div className="relative">
               <img
-                src={member.photoUrl || `https://ui-avatars.com/api/?name=${member.name}&background=${member.gender === "Nam" ? "EBF5FF" : "FFF5F7"}&color=${member.gender === "Nam" ? "2563EB" : "DB2777"}`}
+                src={member.photoUrl || avatarUrl(member.name, { gender: member.gender })}
                 alt={member.name}
                 className="w-10 h-10 rounded-full object-cover border border-white shadow-sm"
               />
@@ -224,6 +212,9 @@ const FamilyTree: React.FC = () => {
 
   return (
     <div className="space-y-8">
+      {error && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-100 text-red-700 text-sm font-medium">{error}</div>
+      )}
       {/* Header & Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
@@ -291,8 +282,9 @@ const FamilyTree: React.FC = () => {
                     className="w-full flex items-center gap-3 p-2 hover:bg-gray-50 rounded-xl transition-colors text-left"
                   >
                     <img
-                      src={m.photoUrl || `https://ui-avatars.com/api/?name=${m.name}`}
-                      className="w-8 h-8 rounded-full border border-gray-100"
+                      src={m.photoUrl || avatarUrl(m.name, { gender: m.gender })}
+                      alt=""
+                      className="w-8 h-8 rounded-full border border-gray-100 object-cover"
                     />
                     <div>
                       <div className="text-sm font-bold text-[#2D2A26]">{m.name}</div>
@@ -358,12 +350,12 @@ const FamilyTree: React.FC = () => {
                 <TransformComponent wrapperClass="!w-full !h-[700px]" contentClass="!w-full !h-full flex items-center justify-center">
                   <div ref={treeRef} className="p-20 inline-block bg-[#FDFCF9] tree-export-container">
                     <div className="flex flex-col items-center gap-16">
-                      {members.filter(m => !m.fatherId && !m.motherId && m.generation === 1).map(ancestor => (
+                      {roots.map(ancestor => (
                         <div key={ancestor.id} className="mb-16 last:mb-0">
                           <MemberNode member={ancestor} level={0} />
                         </div>
                       ))}
-                      {members.filter(m => !m.fatherId && !m.motherId && m.generation === 1).length === 0 && (
+                      {roots.length === 0 && (
                         <div className="text-center py-20">
                           <Users className="w-16 h-16 mx-auto mb-4 text-[#A19D96] opacity-20" />
                           <p className="text-[#A19D96]">Vui lòng thiết lập cha/mẹ cho các thành viên để hiển thị sơ đồ cây.</p>
@@ -398,7 +390,8 @@ const FamilyTree: React.FC = () => {
                     >
                       <div className="flex items-center gap-4">
                         <img
-                          src={member.photoUrl || `https://ui-avatars.com/api/?name=${member.name}`}
+                          src={member.photoUrl || avatarUrl(member.name, { gender: member.gender })}
+                          alt=""
                           className="w-12 h-12 rounded-full object-cover border border-[#E5E1D8]"
                         />
                         <div>
@@ -441,7 +434,7 @@ const FamilyTree: React.FC = () => {
               <div className="px-8 pb-8 -mt-16">
                 <div className="flex flex-col items-center text-center">
                   <img
-                    src={selectedMember.photoUrl || `https://ui-avatars.com/api/?name=${selectedMember.name}&size=128`}
+                    src={selectedMember.photoUrl || avatarUrl(selectedMember.name, { gender: selectedMember.gender, size: 256 })}
                     alt={selectedMember.name}
                     className="w-32 h-32 rounded-full border-4 border-white shadow-xl object-cover mb-4"
                   />
@@ -561,11 +554,6 @@ const FamilyTree: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="pt-6 border-t border-[#E5E1D8] flex gap-3">
-                    <button className="flex-grow py-3 px-4 bg-[#8B2323] text-white rounded-xl font-bold hover:bg-[#6B1B1B] transition-colors">
-                      Xem quan hệ gia đình
-                    </button>
-                  </div>
                 </div>
               </div>
             </motion.div>

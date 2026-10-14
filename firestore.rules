@@ -1,72 +1,46 @@
+rules_version = '2';
+
 // ===============================================================
-// Assumed Data Model
-// ===============================================================
-//
-// This security rules file assumes the following data structures:
-//
-// Collection: members
-// Document ID: auto-generated
-// Fields:
-//   - name: string (required)
-//   - birthDate: string (optional, date format)
-//   - deathDate: string (optional, date format)
-//   - gender: string (required, enum: ["Nam", "Nữ"])
-//   - generation: number (required)
-//   - branch: string (optional)
-//   - role: string (optional)
-//   - biography: string (optional)
-//   - fatherId: string (optional)
-//   - motherId: string (optional)
-//   - spouseId: string (optional)
-//   - photoUrl: string (optional)
-//   - status: string (optional, enum: ["Alive", "Deceased"])
-//
-// Collection: events
-// Document ID: auto-generated
-// Fields:
-//   - title: string (required)
-//   - date: string (required, date-time format)
-//   - location: string (optional)
-//   - description: string (optional)
-//   - type: string (required, enum: ["Kỵ nhật", "Hội họp", "Khác"])
-//   - memberId: string (optional)
-//
-// Collection: activities
-// Document ID: auto-generated
-// Fields:
-//   - userName: string (required)
-//   - userPhoto: string (optional)
-//   - action: string (required)
-//   - timestamp: string (required, date-time format)
-//   - details: string (optional)
-//
+// Mô hình vai trò (users/{uid}.role)
+//   user   : mặc định khi đăng nhập lần đầu, CHỜ DUYỆT, chỉ xem
+//   editor : đã được admin duyệt, thêm/sửa members, events
+//   admin  : tất cả + duyệt/khóa người dùng, xóa dữ liệu
+// Super admin: email cố định dưới đây, luôn có quyền admin.
+// LƯU Ý: email này cũng khai báo ở src/config.ts và biến môi trường
+// SUPER_ADMIN_EMAIL trên Cloudflare Pages. Đổi thì đổi cả 3 nơi.
 // ===============================================================
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
+    // ---------------- Helpers ----------------
 
     function isAuthenticated() {
       return request.auth != null;
     }
 
+    function isSuperAdmin() {
+      return isAuthenticated() && request.auth.token.email == "hanhtoami@gmail.com";
+    }
+
+    function userDocExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActive() {
+      return isAuthenticated() && userDocExists() && userDoc().isLocked != true;
+    }
+
     function isAdmin() {
-      return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         (request.auth.token.email == "hanhtoami@gmail.com"));
+      return isSuperAdmin() || (isActive() && userDoc().role == 'admin');
     }
 
-    function hasRequiredFields(fields) {
-      return request.resource.data.keys().hasAll(fields);
-    }
-
-    function isValidStringLength(field, minLen, maxLen) {
-      return request.resource.data[field] is string &&
-        request.resource.data[field].size() >= minLen &&
-        request.resource.data[field].size() <= maxLen;
+    function isEditor() {
+      return isSuperAdmin() || (isActive() && userDoc().role in ['editor', 'admin']);
     }
 
     function isValidDateString(dateStr) {
@@ -74,14 +48,14 @@ service cloud.firestore {
         dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
     }
 
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
+    // ---------------- Validators ----------------
 
     function isValidMember(data) {
       return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              data.gender in ["Nam", "Nữ"] &&
-             data.generation is number && data.generation >= 1;
+             data.generation is number && data.generation >= 1 &&
+             (!("status" in data) || data.status in ["Alive", "Deceased"]) &&
+             (!("photoUrl" in data) || (data.photoUrl is string && data.photoUrl.size() < 1500000));
     }
 
     function isValidEvent(data) {
@@ -96,36 +70,56 @@ service cloud.firestore {
              isValidDateString(data.timestamp);
     }
 
-    // ===============================================================
-    // Rules
-    // ===============================================================
-
+    // ---------------- members ----------------
     match /members/{memberId} {
       allow read: if true;
-      allow create: if isAuthenticated() && isValidMember(request.resource.data);
-      allow update: if isAuthenticated() && isValidMember(request.resource.data);
+      allow create, update: if isEditor() && isValidMember(request.resource.data);
       allow delete: if isAdmin();
     }
 
+    // ---------------- events ----------------
     match /events/{eventId} {
       allow read: if true;
-      allow create: if isAuthenticated() && isValidEvent(request.resource.data);
-      allow update: if isAuthenticated() && isValidEvent(request.resource.data);
+      allow create, update: if isEditor() && isValidEvent(request.resource.data);
       allow delete: if isAdmin();
     }
 
+    // ---------------- activities (nhật ký, bất biến) ----------------
     match /activities/{activityId} {
       allow read: if true;
-      allow create: if isAuthenticated() && isValidActivity(request.resource.data);
-      allow update: if false; // Activities are immutable
+      allow create: if isEditor() && isValidActivity(request.resource.data);
+      allow update: if false;
       allow delete: if isAdmin();
     }
 
+    // ---------------- users ----------------
     match /users/{userId} {
+      // Chính chủ đọc hồ sơ mình; admin đọc/list tất cả để duyệt.
       allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin()) && 
-                    (request.resource.data.role == resource.data.role || isAdmin());
+
+      // Tự tạo hồ sơ lần đầu: bắt buộc role 'user' (chờ duyệt) và không khóa.
+      // Super admin được tạo với role 'admin'.
+      allow create: if isAuthenticated() && request.auth.uid == userId &&
+                    request.resource.data.isLocked == false &&
+                    (
+                      request.resource.data.role == 'user' ||
+                      (isSuperAdmin() && request.resource.data.role == 'admin')
+                    );
+
+      // Chính chủ chỉ được cập nhật thông tin hiển thị, KHÔNG được đụng role/isLocked.
+      allow update: if isAuthenticated() && request.auth.uid == userId &&
+                    request.resource.data.diff(resource.data).affectedKeys()
+                      .hasOnly(['displayName', 'photoURL', 'lastLogin', 'email']);
+
+      // Admin duyệt (user -> editor), thu hồi, khóa/mở khóa.
+      // Chỉ super admin mới được gán hoặc gỡ role 'admin'.
+      allow update: if isAdmin() && request.auth.uid != userId &&
+                    request.resource.data.role in ['user', 'editor', 'admin'] &&
+                    (
+                      isSuperAdmin() ||
+                      (request.resource.data.role != 'admin' && resource.data.role != 'admin')
+                    );
+
       allow delete: if isAdmin();
     }
   }

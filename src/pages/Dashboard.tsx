@@ -1,76 +1,75 @@
 import React, { useState, useEffect } from "react";
-import { collection, query, orderBy, limit, onSnapshot, getDocs } from "firebase/firestore";
+import { collection, query, orderBy, limit, where, onSnapshot, getDocs } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { motion } from "framer-motion";
-import { 
-  Users, 
-  History, 
-  Calendar, 
-  Activity, 
-  ChevronRight, 
+import {
+  Users,
+  History,
+  Calendar,
+  Activity,
+  ChevronRight,
   ArrowUpRight,
   Quote,
-  ShieldCheck
+  ShieldCheck,
+  HeartPulse,
+  Search
 } from "lucide-react";
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
-import { Link } from "react-router-dom";
-
-interface ActivityLog {
-  id: string;
-  userName: string;
-  userPhoto?: string;
-  action: string;
-  timestamp: string;
-}
-
-interface FamilyEvent {
-  id: string;
-  title: string;
-  date: string;
-  type: string;
-}
+import { Link, useNavigate } from "react-router-dom";
+import type { ActivityLog, FamilyEvent, FamilyMember } from "../types";
+import { avatarUrl } from "../lib/avatar";
 
 const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<FamilyEvent[]>([]);
+  const [founder, setFounder] = useState<FamilyMember | null>(null);
   const [stats, setStats] = useState({
     totalMembers: 0,
     totalGenerations: 0,
-    activeBranches: 6
+    aliveMembers: 0,
   });
-  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Fetch Stats
+    // Thống kê + Thủy tổ (đời 1, không có cha mẹ)
     const fetchStats = async () => {
       try {
         const membersSnap = await getDocs(collection(db, "members"));
-        const members = membersSnap.docs.map(doc => doc.data());
+        const members = membersSnap.docs.map(d => ({ id: d.id, ...d.data() } as FamilyMember));
         const generations = new Set(members.map(m => m.generation));
-        
         setStats({
-          totalMembers: membersSnap.size,
-          totalGenerations: generations.size || 0,
-          activeBranches: 6 // Mocked or derived if branch field exists
+          totalMembers: members.length,
+          totalGenerations: generations.size,
+          aliveMembers: members.filter(m => m.status === "Alive").length,
         });
-      } catch (error) {
-        console.error("Error fetching stats:", error);
+        const root = members
+          .filter(m => !m.fatherId && !m.motherId)
+          .sort((a, b) => a.generation - b.generation)[0];
+        setFounder(root || null);
+      } catch (err) {
+        setError(handleFirestoreError(err, OperationType.LIST, "members"));
       }
     };
 
-    // Fetch Activities
     const qActivities = query(collection(db, "activities"), orderBy("timestamp", "desc"), limit(4));
     const unsubActivities = onSnapshot(qActivities, (snapshot) => {
       setActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ActivityLog)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, "activities"));
+    }, (err) => setError(handleFirestoreError(err, OperationType.LIST, "activities")));
 
-    // Fetch Events
-    const qEvents = query(collection(db, "events"), orderBy("date", "asc"), limit(3));
+    // Chỉ lấy sự kiện từ hôm nay trở đi
+    const todayIso = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    const qEvents = query(
+      collection(db, "events"),
+      where("date", ">=", todayIso),
+      orderBy("date", "asc"),
+      limit(3)
+    );
     const unsubEvents = onSnapshot(qEvents, (snapshot) => {
       setUpcomingEvents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FamilyEvent)));
-      setLoading(false);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, "events"));
+    }, (err) => setError(handleFirestoreError(err, OperationType.LIST, "events")));
 
     fetchStats();
     return () => {
@@ -79,32 +78,41 @@ const Dashboard: React.FC = () => {
     };
   }, []);
 
+  const submitSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = search.trim();
+    navigate(q ? `/members?q=${encodeURIComponent(q)}` : "/members");
+  };
+
   return (
     <div className="space-y-10 pb-20">
+      {error && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-100 text-red-700 text-sm font-medium">{error}</div>
+      )}
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="font-serif text-3xl font-bold text-[#2D2A26]">Tổng Quan Gia Tộc</h1>
           <p className="text-[#A19D96] text-sm mt-1">Chào mừng bạn quay trở lại với không gian truyền thống dòng họ.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <form onSubmit={submitSearch} className="flex items-center gap-2">
           <div className="relative">
-            <input 
-              type="text" 
-              placeholder="Tìm kiếm thành viên..." 
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Tìm kiếm thành viên..."
               className="pl-10 pr-4 py-2 bg-white border border-[#E5E1D8] rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20 w-64"
             />
-            <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A19D96]" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A19D96]" />
           </div>
-        </div>
+        </form>
       </div>
 
       {/* Hero Banner */}
       <section className="relative rounded-[40px] overflow-hidden bg-[#FDFCF9] border border-[#E5E1D8] p-8 md:p-12">
-        <div className="absolute top-0 right-0 w-1/3 h-full opacity-10 pointer-events-none">
-          <img src="https://picsum.photos/seed/pattern/800/800" alt="pattern" className="object-cover w-full h-full grayscale" />
-        </div>
-        
+        <div className="absolute top-0 right-0 w-1/3 h-full opacity-[0.04] pointer-events-none bg-[#8B2323]" />
+
         <div className="relative z-10 max-w-3xl">
           <span className="inline-block px-4 py-1 bg-[#8B2323] text-white text-[10px] font-bold uppercase tracking-[0.2em] rounded-full mb-6">
             Lịch Sử & Truyền Thống
@@ -141,7 +149,7 @@ const Dashboard: React.FC = () => {
         {[
           { label: "Tổng số đời", value: stats.totalGenerations, sub: "Thế hệ", icon: History, color: "text-amber-600", bg: "bg-amber-50" },
           { label: "Tổng thành viên", value: stats.totalMembers, sub: "Nhân khẩu", icon: Users, color: "text-blue-600", bg: "bg-blue-50" },
-          { label: "Chi nhánh hoạt động", value: stats.activeBranches, sub: "Chi tộc", icon: ShieldCheck, color: "text-[#8B2323]", bg: "bg-red-50" },
+          { label: "Còn sống", value: stats.aliveMembers, sub: "Thành viên", icon: HeartPulse, color: "text-[#8B2323]", bg: "bg-red-50" },
         ].map((stat, i) => (
           <motion.div
             key={i}
@@ -169,8 +177,8 @@ const Dashboard: React.FC = () => {
               <div className="w-1.5 h-6 bg-[#8B2323] rounded-full" />
               <h3 className="font-serif text-2xl font-bold text-[#2D2A26]">Hoạt Động Gần Đây</h3>
             </div>
-            <Link to="/admin" className="text-xs font-bold text-[#8B2323] flex items-center gap-1 hover:underline">
-              Xem tất cả <ArrowUpRight className="w-3 h-3" />
+            <Link to="/members" className="text-xs font-bold text-[#8B2323] flex items-center gap-1 hover:underline">
+              Xem thành viên <ArrowUpRight className="w-3 h-3" />
             </Link>
           </div>
 
@@ -184,8 +192,9 @@ const Dashboard: React.FC = () => {
                 className="bg-white p-6 rounded-3xl border border-[#E5E1D8] flex items-start gap-4 group hover:border-[#8B2323]/30 transition-all"
               >
                 <img 
-                  src={activity.userPhoto || `https://ui-avatars.com/api/?name=${activity.userName}`} 
-                  alt={activity.userName} 
+                  src={activity.userPhoto || avatarUrl(activity.userName)}
+                  alt={activity.userName}
+                  referrerPolicy="no-referrer"
                   className="w-12 h-12 rounded-2xl border border-[#E5E1D8] object-cover"
                 />
                 <div className="flex-grow">
@@ -217,6 +226,11 @@ const Dashboard: React.FC = () => {
             </div>
             
             <div className="space-y-4">
+              {upcomingEvents.length === 0 && (
+                <div className="bg-white p-5 rounded-3xl border border-dashed border-[#E5E1D8] text-sm text-[#A19D96] text-center">
+                  Chưa có sự kiện sắp tới.
+                </div>
+              )}
               {upcomingEvents.map((event) => (
                 <div key={event.id} className="bg-white p-5 rounded-3xl border border-[#E5E1D8] flex gap-4 items-center">
                   <div className="w-14 h-14 bg-[#8B2323] rounded-2xl flex flex-col items-center justify-center text-white">
@@ -241,18 +255,28 @@ const Dashboard: React.FC = () => {
             <div className="text-center space-y-6">
               <h4 className="font-serif text-xl font-bold text-[#2D2A26]">Tổ Tiên Khởi Đầu</h4>
               <div className="relative inline-block">
-                <img 
-                  src="https://picsum.photos/seed/ancestor/200/200" 
-                  alt="Founder" 
-                  className="w-32 h-32 rounded-3xl border-4 border-white shadow-xl object-cover grayscale"
-                />
+                {founder?.photoUrl ? (
+                  <img
+                    src={founder.photoUrl}
+                    alt={founder.name}
+                    className="w-32 h-32 rounded-3xl border-4 border-white shadow-xl object-cover"
+                  />
+                ) : (
+                  <div className="w-32 h-32 rounded-3xl border-4 border-white shadow-xl bg-[#8B2323] text-white font-serif text-6xl flex items-center justify-center">
+                    阮
+                  </div>
+                )}
                 <div className="absolute -bottom-2 -right-2 bg-[#8B2323] text-white p-2 rounded-xl shadow-lg">
                   <ShieldCheck className="w-4 h-4" />
                 </div>
               </div>
               <div>
-                <h5 className="font-serif text-2xl font-bold text-[#8B2323]">Thủy Tổ Nguyễn Nhuận Công</h5>
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#A19D96] mt-1">Thế Hệ Thứ Nhất</p>
+                <h5 className="font-serif text-2xl font-bold text-[#8B2323]">
+                  {founder ? `Thủy Tổ ${founder.name}` : "Thủy Tổ"}
+                </h5>
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#A19D96] mt-1">
+                  {founder ? `Thế hệ thứ ${founder.generation}` : "Thế Hệ Thứ Nhất"}
+                </p>
               </div>
               <p className="text-sm text-[#6B665F] leading-relaxed italic">
                 "Thế hệ trẻ hãy luôn nhớ về cội nguồn, trân trọng và tôn kính tổ tiên. Sự đoàn kết, yêu thương và tinh thần tương trợ lẫn nhau là nền tảng vững chắc để vươn lên, xây dựng cộng đồng ngày càng vững mạnh."

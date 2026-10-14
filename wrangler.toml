@@ -1,0 +1,18 @@
+# Cấu hình Cloudflare Pages (gói Free).
+# Pages đọc file này khi build từ Git. Biến môi trường và binding khai báo ở đây
+# sẽ được dùng cho cả production và preview; có thể ghi đè trong Dashboard.
+name = "giapha"
+compatibility_date = "2026-10-01"
+pages_build_output_dir = "dist"
+
+[vars]
+FIREBASE_PROJECT_ID = "gen-lang-client-0885231263"
+FIRESTORE_DATABASE_ID = "ai-studio-5efe7ae5-0c26-4948-aa25-806eda41487f"
+FIREBASE_AUTH_DOMAIN = "gen-lang-client-0885231263.firebaseapp.com"
+# Phải trùng src/config.ts và firestore.rules
+SUPER_ADMIN_EMAIL = "hanhtoami@gmail.com"
+
+# Bucket R2 chứa ảnh thành viên. Tạo bucket tên "giapha-photos" trong Dashboard > R2.
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "giapha-photos"
