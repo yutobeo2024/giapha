@@ -59,7 +59,7 @@ function SceneContent(props: SceneProps & { lowPerf: boolean }) {
     if (mode === "story") highlightIds.forEach((id) => ids.add(id));
     else if (activeGen != null) layout.nodes.filter((n) => n.member.generation === activeGen).forEach((n) => ids.add(n.member.id));
     else nearby.forEach((id) => ids.add(id));
-    return [...ids].slice(0, activeGen != null ? 24 : MAX_LABELS);
+    return [...ids].slice(0, activeGen != null ? 80 : MAX_LABELS);
   }, [highlightIds, hoverId, selectedId, mode, activeGen, nearby, layout]);
 
   return (

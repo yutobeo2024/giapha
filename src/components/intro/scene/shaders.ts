@@ -157,7 +157,7 @@ export function makeBarkMaterial(
     color: "#ffffff",
     roughness: 0.93,
     metalness: 0.03,
-    emissive: "#1f1006",
+    emissive: "#0e0806",
     emissiveIntensity: 0.5,
   });
   mat.onBeforeCompile = (shader) => {
@@ -185,7 +185,7 @@ export function makeBarkMaterial(
         float bh = texture2D(uHeight, vMapUv).r;
         float furrow = smoothstep(0.45, 0.08, bh);
         float pulse = pow(0.5 + 0.5 * sin((vWPos.y * 0.85 - uTime * 1.3) + bh * 6.0), 7.0);
-        totalEmissiveRadiance += vec3(1.0, 0.56, 0.18) * furrow * (0.12 + pulse * 1.1);`
+        totalEmissiveRadiance += vec3(1.0, 0.62, 0.22) * furrow * (0.1 + pulse * 1.0);`
       );
   };
   return mat;

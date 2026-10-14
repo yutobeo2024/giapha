@@ -15,7 +15,7 @@ export interface LayoutNode {
   woodRadius: number;
 }
 
-export type ChainKind = "trunk" | "branch" | "buttress" | "rootlet";
+export type ChainKind = "trunk" | "branch";
 
 /**
  * Một "trục" gỗ liền mạch như cây thật: thân chạy thẳng qua dòng chính, mỗi cành con là một chuỗi
@@ -43,7 +43,7 @@ export interface TreeLayout {
   /** Bán kính tán lớn nhất ở mỗi đời (để đặt camera) */
   spreadOf: (gen: number) => number;
   groundY: number;
-  /** Thân chính: bán kính ở gốc (đã loe) và ở đỉnh (chỗ chia cành), độ cao đỉnh, độ lan của rễ */
+  /** Thân chính: bán kính ở gốc (đã loe) và ở đỉnh (chỗ chia cành), độ cao đỉnh, độ loe của gốc trên mặt đất */
   trunk: { baseRadius: number; topRadius: number; topY: number; rootSpread: number };
 }
 
@@ -183,6 +183,30 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
   };
   for (const r of roots) place(r, true);
 
+  // Các đời đầu: người không có (hoặc rất ít) hậu duệ bị sunburst dồn vào phần cung còn trống bên cạnh dòng chính.
+  // Dàn lại đều quanh thân theo góc vàng (như lá mọc quanh thân cây), đẩy ra xa trục để thành cành riêng cân đối.
+  const EARLY_GENS = 6;
+  const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+  const minor = nodes
+    .filter((n) => !n.isRoot && n.member.generation - minGen <= EARLY_GENS && n.leaves <= 2 && !!parentOf(n.member))
+    .filter((n) => {
+      const p = byId.get(parentOf(n.member)!);
+      return !!p && p.leaves > 2; // chỉ những nhánh phụ tách thẳng từ dòng chính
+    })
+    .sort((a, b) => a.member.generation - b.member.generation || a.member.name.localeCompare(b.member.name, "vi"));
+  const placeSubtree = (n: LayoutNode, angle: number, depth: number) => {
+    const genIndex = n.member.generation - minGen;
+    const r = radiusFor(genIndex) * 1.12 + 0.5 + depth * 0.2;
+    n.angle = angle;
+    n.position = [Math.cos(angle) * r, n.position[1], Math.sin(angle) * r];
+    spreadByGen.set(n.member.generation, Math.max(spreadByGen.get(n.member.generation) || 0, r));
+    (children.get(n.member.id) || []).forEach((k, i) => placeSubtree(byId.get(k.id)!, angle + (i - 0.5) * 0.35, depth + 1));
+  };
+  minor.forEach((n, i) => placeSubtree(n, 0.6 + i * GOLDEN, 0));
+
+  // Chuẩn hoá góc về [0, 2π) trước khi giãn cách
+  for (const n of nodes) n.angle = ((n.angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+
   // Giãn các đốm cùng đời quá sát nhau: đẩy ra trên vòng tròn tới khi cách nhau ít nhất MIN_GAP
   const MIN_GAP = 0.7;
   const byGen = new Map<number, LayoutNode[]>();
@@ -281,6 +305,12 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     const rParent = radiusAt(at);
     const leaf = !(children.get(child.member.id) || []).length;
     const rChild = leaf ? TIP_RADIUS * 1.35 : radiusAt(child);
+    // Cành ở các đời đầu to như cành cái dù chưa có hậu duệ ghi trong gia phả (cân đối với tán phía trên)
+    const early = child.member.generation - minGen <= 6 && child.leaves <= 2;
+    const r0 = early ? Math.min(rParent * 0.6, 0.5) : Math.min(rParent * 0.6, leaf ? 0.12 : rChild * 1.5);
+    const r1 = early ? Math.min(rParent * 0.75, 0.34) : Math.min(rParent * 0.75, leaf ? 0.11 : rChild * 1.35);
+    const rMid = early ? Math.max(0.22, rChild * 1.12) : leaf ? 0.085 : rChild * 1.12;
+    const rEnd = early ? Math.max(leaf ? 0.12 : 0.2, leaf ? 0 : rChild * collarAt(child)) : leaf ? rChild : rChild * collarAt(child);
     const toChild = v3.norm(v3.sub(child.position, at.position));
     const lean = v3.norm(v3.add(v3.scale(tangent, 0.6), v3.scale(toChild, 0.4)));
     const collar = v3.add(v3.add(at.position, v3.scale(lean, rParent * 1.1)), [0, rParent * 0.1, 0]);
@@ -288,15 +318,15 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
       id: child.member.id,
       kind: "branch",
       points: [at.position, collar],
-      radii: [Math.min(rParent * 0.6, leaf ? 0.12 : rChild * 1.5), Math.min(rParent * 0.75, leaf ? 0.11 : rChild * 1.35)],
+      radii: [r0, r1],
       gens: [child.member.generation - 0.9, child.member.generation - 0.75],
       startInside: true,
     };
     chain.points.push(midPoint(at, child));
-    chain.radii.push(leaf ? 0.085 : rChild * 1.12);
+    chain.radii.push(rMid);
     chain.gens.push(child.member.generation - 0.5);
     chain.points.push(child.position);
-    chain.radii.push(leaf ? rChild : rChild * collarAt(child));
+    chain.radii.push(rEnd);
     chain.gens.push(child.member.generation);
     chains.push(chain);
     extend(chain, child, at.position);
@@ -331,49 +361,7 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
       startSide(fake, n, [0, 1, 0]);
     }
 
-    // Rễ bạnh lan trên mặt đất + rễ con rẽ nhánh (mọc từ trong gốc nên không cần nắp)
-    const BUTTRESSES = 8;
-    for (let i = 0; i < BUTTRESSES; i++) {
-      const a = (i / BUTTRESSES) * Math.PI * 2 + 0.3 + (hash01("ba" + i) - 0.5) * 0.35;
-      const len = 3.6 + hash01("root" + i) * 2.0;
-      rootSpread = Math.max(rootSpread, len);
-      const ca = Math.cos(a);
-      const sa = Math.sin(a);
-      const bend = (hash01("bend" + i) - 0.5) * 0.9;
-      chains.push({
-        id: "__root" + i,
-        kind: "buttress",
-        points: [
-          [ca * trunkTop * 0.5, GROUND_Y + 1.25, sa * trunkTop * 0.5],
-          [ca * trunkBase * 0.98, GROUND_Y + 0.42, sa * trunkBase * 0.98],
-          [Math.cos(a + bend * 0.3) * len * 0.55, GROUND_Y + 0.03, Math.sin(a + bend * 0.3) * len * 0.55],
-          [Math.cos(a + bend * 0.5) * len, GROUND_Y - 0.12, Math.sin(a + bend * 0.5) * len],
-        ],
-        radii: [trunkTop * 0.6, trunkTop * 0.46, trunkTop * 0.2, 0.05],
-        gens: [g0, g0, g0, g0],
-        startInside: true,
-      });
-      const subs = 1 + (hash01("subn" + i) > 0.45 ? 1 : 0);
-      for (let s = 0; s < subs; s++) {
-        const side = s === 0 ? 1 : -1;
-        const sa2 = a + side * (0.5 + hash01("suba" + i + s) * 0.35);
-        const t0 = 0.4 + hash01("subt" + i + s) * 0.2;
-        const start: Vec3 = [Math.cos(a + bend * 0.2) * len * t0, GROUND_Y + 0.05, Math.sin(a + bend * 0.2) * len * t0];
-        const sl = len * (0.35 + hash01("subl" + i + s) * 0.3);
-        chains.push({
-          id: `__rootlet${i}_${s}`,
-          kind: "rootlet",
-          points: [
-            start,
-            [start[0] + Math.cos(sa2) * sl * 0.4, GROUND_Y - 0.02, start[2] + Math.sin(sa2) * sl * 0.4],
-            [start[0] + Math.cos(sa2) * sl, GROUND_Y - 0.15, start[2] + Math.sin(sa2) * sl],
-          ],
-          radii: [trunkTop * 0.15, trunkTop * 0.08, 0.03],
-          gens: [g0, g0, g0],
-          startInside: true,
-        });
-      }
-    }
+    rootSpread = trunkBase * 1.5;
   }
 
   return {

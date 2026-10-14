@@ -466,7 +466,7 @@ const Intro: React.FC = () => {
               spin={spin}
               fly={fly}
               activeGen={activeGen}
-              onInteract={() => setActiveGen(null)}
+              onInteract={() => undefined}
             />
           </Suspense>
         )}
