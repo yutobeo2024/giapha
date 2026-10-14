@@ -15,6 +15,9 @@ export interface LayoutNode {
   woodRadius: number;
 }
 
+/** Loại ống gỗ: quyết định cách thuôn và độ gồ ghề khi dựng hình */
+export type BranchKind = "trunk" | "buttress" | "rootlet" | "aerial" | "branch";
+
 export interface LayoutBranch {
   fromId: string;
   toId: string;
@@ -24,13 +27,14 @@ export interface LayoutBranch {
   radiusStart: number;
   radiusEnd: number;
   generation: number;
+  kind: BranchKind;
 }
 
 export interface TreeLayout {
   nodes: LayoutNode[];
   byId: Map<string, LayoutNode>;
   branches: LayoutBranch[];
-  /** Rễ và thân dưới gốc, vẽ như các nhánh */
+  /** Thân dưới gốc, rễ bạnh, rễ con và rễ khí: vẽ như các nhánh */
   roots: LayoutBranch[];
   minGen: number;
   maxGen: number;
@@ -39,11 +43,14 @@ export interface TreeLayout {
   /** Bán kính tán lớn nhất ở mỗi đời (để đặt camera) */
   spreadOf: (gen: number) => number;
   groundY: number;
+  /** Thân chính: bán kính ở gốc (đã loe) và ở đỉnh (chỗ chia cành), độ cao đỉnh */
+  trunk: { baseRadius: number; topRadius: number; topY: number; rootSpread: number };
 }
 
 /** Khoảng cách dọc giữa hai đời */
-export const GEN_HEIGHT = 1.55;
-const GROUND_Y = -2.2;
+export const GEN_HEIGHT = 1.5;
+/** Mặt đất thấp hơn Thủy tổ để có thân trụ cao, gốc loe và rễ bạnh */
+const GROUND_Y = -5.0;
 
 /** Hash ổn định từ chuỗi → [0,1) để nhiễu không đổi giữa các lần render */
 function hash01(s: string, salt = 0): number {
@@ -55,18 +62,22 @@ function hash01(s: string, salt = 0): number {
   return ((h >>> 0) % 100000) / 100000;
 }
 
-/** Bán kính (khoảng cách ra khỏi trục thân) theo đời: đời đầu sát thân, càng lên càng xòe. */
+/** Bán kính (khoảng cách ra khỏi trục thân) theo đời: đời 2 thoát khỏi thân to, càng lên càng xòe. */
 function radiusFor(genIndex: number): number {
   if (genIndex <= 0) return 0;
-  if (genIndex === 1) return 0.55;
-  if (genIndex === 2) return 0.95;
-  return 0.95 + Math.pow(genIndex - 2, 1.08) * 0.82;
+  if (genIndex === 1) return 1.3;
+  if (genIndex === 2) return 2.1;
+  return 2.1 + Math.pow(genIndex - 2, 1.08) * 0.95;
 }
 
-/** "Pipe model" của cây thật: nhánh nuôi nhiều lá thì to, nhánh ít lá thì mảnh. */
-function pipeRadius(leaves: number): number {
-  return Math.max(0.022, 0.06 * Math.pow(leaves, 0.45));
+/** "Pipe model" của cây thật: nhánh nuôi nhiều lá thì to, nhánh ít lá thì mảnh. Hệ số lớn cho dáng cổ thụ. */
+export function pipeRadius(leaves: number): number {
+  return Math.max(0.035, 0.13 * Math.pow(leaves, 0.5));
 }
+
+/** Thân chính không bao giờ mảnh hơn mức này dù dữ liệu còn ít đời */
+const TRUNK_MIN_RADIUS = 1.05;
+const TRUNK_FLARE = 1.7;
 
 /**
  * Tính bố cục cây 3D kiểu "sunburst quanh thân":
@@ -138,12 +149,17 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     return -Math.PI / 2 + ((a + b) / 2 / totalLeaves) * Math.PI * 2;
   };
 
+  // Tổng số lá (không trọng số) để tính "phần gánh" của mỗi nút
+  const totalLeafCount = roots.reduce((s, r) => s + leavesOf(r.id), 0) || 1;
+
   const place = (m: FamilyMember, isRoot: boolean) => {
     const genIndex = m.generation - minGen;
     const angle = angleOf(m.id);
-    const jitterR = (hash01(m.id, 1) - 0.5) * 0.35 * Math.min(1, genIndex / 3);
-    const jitterY = (hash01(m.id, 2) - 0.5) * 0.45 * Math.min(1, genIndex / 2);
-    const r = Math.max(0, radiusFor(genIndex) + jitterR);
+    const jitterR = (hash01(m.id, 1) - 0.5) * 0.4 * Math.min(1, genIndex / 3);
+    const jitterY = (hash01(m.id, 2) - 0.5) * 0.5 * Math.min(1, genIndex / 2);
+    // Nút gánh phần lớn hậu duệ nằm sát trục (thân cây tiếp tục vươn lên), nút ít hậu duệ tỏa ra ngoài
+    const pull = Math.pow(leavesOf(m.id) / totalLeafCount, 0.6);
+    const r = Math.max(0, radiusFor(genIndex) * (1 - 0.88 * pull) + jitterR * (1 - pull));
     const pos: Vec3 = [Math.cos(angle) * r, heightOf(m.generation) + jitterY, Math.sin(angle) * r];
     const hasKids = (children.get(m.id) || []).length > 0;
     const node: LayoutNode = { member: m, position: pos, angle, leaves: leavesOf(m.id), isRoot, woodRadius: hasKids ? pipeRadius(leavesOf(m.id)) : 0 };
@@ -155,7 +171,7 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
   for (const r of roots) place(r, true);
 
   // Giãn các đốm cùng đời quá sát nhau: đẩy ra trên vòng tròn tới khi cách nhau ít nhất MIN_GAP
-  const MIN_GAP = 0.6;
+  const MIN_GAP = 0.7;
   const byGen = new Map<number, LayoutNode[]>();
   for (const n of nodes) {
     if (!byGen.has(n.member.generation)) byGen.set(n.member.generation, []);
@@ -188,6 +204,12 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     }
   }
 
+  // Thân chính: bán kính ở đỉnh (chỗ Thủy tổ, nơi chia cành) và ở gốc (loe)
+  const mainRoot = nodes.find((n) => n.isRoot);
+  const trunkTop = Math.max(TRUNK_MIN_RADIUS, mainRoot ? pipeRadius(mainRoot.leaves) : TRUNK_MIN_RADIUS);
+  const trunkBase = trunkTop * TRUNK_FLARE;
+  if (mainRoot) mainRoot.woodRadius = trunkTop;
+
   // Nhánh cha → con: cong lên trên rồi tỏa ra
   for (const n of nodes) {
     const kids = children.get(n.member.id) || [];
@@ -200,46 +222,104 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
       const p2: Vec3 = [px + (cx - px) * 0.7, cy - lift * 0.25, pz + (cz - pz) * 0.7];
       const kidKids = children.get(k.id) || [];
       const endLeaves = kidKids.length ? Math.max(...kidKids.map((x) => leavesOf(x.id))) : 1;
+      // Cành từ Thủy tổ (đời 1) là các "cành cái" to, nối thẳng vào thân
+      const fromTrunk = n.isRoot;
       branches.push({
         fromId: n.member.id,
         toId: k.id,
         points: [n.position, p1, p2, c.position],
-        radiusStart: pipeRadius(leavesOf(k.id)),
+        radiusStart: fromTrunk ? Math.max(pipeRadius(leavesOf(k.id)) * 1.15, trunkTop * 0.42) : pipeRadius(leavesOf(k.id)),
         radiusEnd: pipeRadius(Math.max(1, Math.min(leavesOf(k.id), endLeaves))) * 0.85,
         generation: k.generation,
+        kind: "branch",
       });
     }
   }
 
-  // Thân dưới gốc chính + bộ rễ tỏa trên mặt đất
+  // Thân dưới gốc + rễ bạnh lan trên mặt đất + rễ con + rễ khí rủ quanh thân (cây đa cổ thụ)
   const rootBranches: LayoutBranch[] = [];
-  const mainRoot = nodes.find((n) => n.isRoot);
+  let rootSpread = 0;
   if (mainRoot) {
     const [rx, ry, rz] = mainRoot.position;
     rootBranches.push({
       fromId: "__ground",
       toId: mainRoot.member.id,
-      points: [[0, GROUND_Y, 0], [0, GROUND_Y + 0.8, 0], [rx * 0.5, ry - 0.6, rz * 0.5], mainRoot.position],
-      radiusStart: pipeRadius(mainRoot.leaves) * 1.45,
-      radiusEnd: pipeRadius(mainRoot.leaves),
+      points: [[0, GROUND_Y - 0.3, 0], [0, GROUND_Y + 1.2, 0], [rx * 0.3, ry - 1.4, rz * 0.3], mainRoot.position],
+      radiusStart: trunkBase,
+      radiusEnd: trunkTop,
       generation: minGen,
+      kind: "trunk",
     });
-    const ROOTS = 7;
-    for (let i = 0; i < ROOTS; i++) {
-      const a = (i / ROOTS) * Math.PI * 2 + 0.3;
-      const len = 1.6 + hash01("root" + i) * 1.4;
+
+    const BUTTRESSES = 8;
+    for (let i = 0; i < BUTTRESSES; i++) {
+      const a = (i / BUTTRESSES) * Math.PI * 2 + 0.3 + (hash01("ba" + i) - 0.5) * 0.35;
+      const len = 3.6 + hash01("root" + i) * 2.0;
+      rootSpread = Math.max(rootSpread, len);
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      const bend = (hash01("bend" + i) - 0.5) * 0.9;
+      const main: Vec3[] = [
+        [ca * trunkTop * 0.55, GROUND_Y + 1.15, sa * trunkTop * 0.55],
+        [ca * trunkBase * 0.95, GROUND_Y + 0.4, sa * trunkBase * 0.95],
+        [Math.cos(a + bend * 0.3) * len * 0.55, GROUND_Y + 0.02, Math.sin(a + bend * 0.3) * len * 0.55],
+        [Math.cos(a + bend * 0.5) * len, GROUND_Y - 0.12, Math.sin(a + bend * 0.5) * len],
+      ];
       rootBranches.push({
         fromId: "__ground",
         toId: "__root" + i,
-        points: [
-          [0, GROUND_Y + 0.5, 0],
-          [Math.cos(a) * 0.5, GROUND_Y + 0.1, Math.sin(a) * 0.5],
-          [Math.cos(a) * len * 0.6, GROUND_Y - 0.05, Math.sin(a) * len * 0.6],
-          [Math.cos(a) * len, GROUND_Y - 0.15, Math.sin(a) * len],
-        ],
-        radiusStart: pipeRadius(mainRoot.leaves) * 0.5,
-        radiusEnd: 0.02,
+        points: main,
+        radiusStart: trunkTop * 0.55,
+        radiusEnd: 0.05,
         generation: minGen,
+        kind: "buttress",
+      });
+      // Rễ con rẽ nhánh từ giữa rễ bạnh
+      const subs = 1 + (hash01("subn" + i) > 0.45 ? 1 : 0);
+      for (let s = 0; s < subs; s++) {
+        const side = s === 0 ? 1 : -1;
+        const sa2 = a + side * (0.5 + hash01("suba" + i + s) * 0.35);
+        const t0 = 0.4 + hash01("subt" + i + s) * 0.2;
+        const start: Vec3 = [Math.cos(a + bend * 0.2) * len * t0, GROUND_Y + 0.05, Math.sin(a + bend * 0.2) * len * t0];
+        const sl = len * (0.35 + hash01("subl" + i + s) * 0.3);
+        rootBranches.push({
+          fromId: "__root" + i,
+          toId: `__rootlet${i}_${s}`,
+          points: [
+            start,
+            [start[0] + Math.cos(sa2) * sl * 0.4, GROUND_Y - 0.02, start[2] + Math.sin(sa2) * sl * 0.4],
+            [start[0] + Math.cos(sa2) * sl, GROUND_Y - 0.15, start[2] + Math.sin(sa2) * sl],
+          ],
+          radiusStart: trunkTop * 0.16,
+          radiusEnd: 0.03,
+          generation: minGen,
+          kind: "rootlet",
+        });
+      }
+    }
+
+    // Rễ khí: sợi rủ từ thân xuống, vài sợi chạm đất
+    const AERIAL = 10;
+    for (let i = 0; i < AERIAL; i++) {
+      const a = (i / AERIAL) * Math.PI * 2 + 0.9 + (hash01("aa" + i) - 0.5) * 0.5;
+      const y0 = GROUND_Y + 2.0 + hash01("ay" + i) * 1.6;
+      const rAt = trunkTop * (1 + 0.5 * Math.pow((mainRoot.position[1] - y0) / (mainRoot.position[1] - GROUND_Y), 2.2));
+      const reach = trunkBase + 0.5 + hash01("ar" + i) * 1.4;
+      const touches = hash01("at" + i) > 0.4;
+      const yEnd = touches ? GROUND_Y - 0.1 : GROUND_Y + 0.6 + hash01("ae" + i) * 1.0;
+      rootBranches.push({
+        fromId: "__trunk",
+        toId: "__aerial" + i,
+        points: [
+          [Math.cos(a) * rAt * 0.9, y0, Math.sin(a) * rAt * 0.9],
+          [Math.cos(a) * (rAt + 0.35), y0 - 0.5, Math.sin(a) * (rAt + 0.35)],
+          [Math.cos(a + 0.08) * reach * 0.9, (y0 + yEnd) / 2, Math.sin(a + 0.08) * reach * 0.9],
+          [Math.cos(a + 0.12) * reach, yEnd, Math.sin(a + 0.12) * reach],
+        ],
+        radiusStart: 0.07 + hash01("aw" + i) * 0.05,
+        radiusEnd: 0.025,
+        generation: minGen,
+        kind: "aerial",
       });
     }
   }
@@ -252,7 +332,8 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     minGen,
     maxGen,
     heightOf,
-    spreadOf: (gen: number) => spreadByGen.get(gen) ?? radiusFor(gen - minGen),
+    spreadOf: (gen: number) => Math.max(gen === minGen ? trunkTop : 0, spreadByGen.get(gen) ?? radiusFor(gen - minGen)),
     groundY: GROUND_Y,
+    trunk: { baseRadius: trunkBase, topRadius: trunkTop, topY: mainRoot ? mainRoot.position[1] : 0, rootSpread },
   };
 }
