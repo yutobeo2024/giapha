@@ -35,7 +35,7 @@ export const INTRO_CHAPTERS: IntroChapter[] = [
     id: "mo-dau",
     kicker: "Phả hệ dòng tộc",
     title: "Gia Phả Họ Nguyễn Nhuận",
-    body: "Cây có cội mới nảy cành xanh lá, nước có nguồn mới bể rộng sông sâu. Mỗi đốm sáng trên cây là một người con của dòng họ, nối liền từ Thủy tổ đến hôm nay.",
+    body: "Cây có cội mới nảy cành xanh lá, nước có nguồn mới bể rộng sông sâu. Mỗi ánh sáng trên cây là một người con của dòng họ: đốm ngọc vàng là các bậc tiền nhân đã khuất, chiếc đèn lá xanh là người đang sống hôm nay, nối liền từ Thủy tổ đến mai sau.",
     focus: "all",
     azimuth: 20,
     zoom: 1.12,
@@ -92,7 +92,7 @@ export const INTRO_CHAPTERS: IntroChapter[] = [
     kicker: "Hôm nay",
     title: "Cành lá sum suê",
     body: (s) =>
-      `Từ một cội nguồn, dòng họ đã vươn thành ${s.generations} thế hệ với ${s.totalMembers} người con được ghi danh trong gia phả. Đời thứ ${s.maxGen} hiện có ${s.latestGenCount} người, và cây vẫn đang tiếp tục đâm chồi.`,
+      `Từ một cội nguồn, dòng họ đã vươn thành ${s.generations} thế hệ với ${s.totalMembers} người con được ghi danh trong gia phả. Đời thứ ${s.maxGen} hiện có ${s.latestGenCount} người. ${s.alive} chiếc đèn lá xanh là những người đang sống hôm nay, và cây vẫn đang tiếp tục đâm chồi.`,
     focus: "latest",
     azimuth: 340,
     zoom: 1.1,

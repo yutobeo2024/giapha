@@ -2,13 +2,14 @@ import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useStat
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
-import { ChevronDown, ChevronUp, Maximize2, Minimize2, Music2, VolumeX, X, Network, Users, ArrowRight } from "lucide-react";
+import { ChevronDown, ChevronUp, Maximize2, Minimize2, Music2, VolumeX, X, Network, Users, ArrowRight, Orbit, Compass, ArrowUpFromLine } from "lucide-react";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import type { FamilyMember } from "../types";
-import { STATUS_LABEL } from "../types";
+import { STATUS_LABEL, isAlive } from "../types";
 import { computeTreeLayout } from "../lib/treeLayout3d";
 import { INTRO_CHAPTERS, computeIntroStats } from "../data/introChapters";
-import type { Quality } from "../components/intro/TreeScene";
+import type { Quality, SceneMode, SpinState, FlyRequest } from "../components/intro/TreeScene";
+import ExploreBar from "../components/intro/ExploreBar";
 
 const TreeScene = lazy(() => import("../components/intro/TreeScene"));
 
@@ -49,6 +50,9 @@ function usePanelMode(): "left" | "bottom" {
 type FsElement = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
 type FsDocument = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => Promise<void> | void };
 
+/** Phần tử tương tác: không bắt đầu kéo xoay từ đây */
+const isInteractive = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("button, a, input, .intro-explore-bar, .intro-member-card");
+
 const Intro: React.FC = () => {
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +64,15 @@ const Intro: React.FC = () => {
   const [musicOn, setMusicOn] = useState(false);
   const [selected, setSelected] = useState<FamilyMember | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
+
+  // Chế độ Khám phá 3D
+  const [mode, setMode] = useState<SceneMode>("story");
+  const [fly, setFly] = useState<FlyRequest | null>(null);
+  const [activeGen, setActiveGen] = useState<number | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
+  const hintShown = useRef(false);
+  const flySeq = useRef(0);
+  const spin = useRef<SpinState>({ offset: 0, velocity: 0, dragging: false });
 
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -102,11 +115,17 @@ const Intro: React.FC = () => {
   const highlightIds = useMemo(() => new Set((chapter.highlight || []).filter((id) => layout.byId.has(id))), [chapter, layout]);
   const body = typeof chapter.body === "function" ? chapter.body(stats, members) : chapter.body;
   const total = INTRO_CHAPTERS.length;
+  const exploring = mode === "explore";
 
   // ---------- navigation
+  const resetSpin = () => {
+    spin.current.offset = 0;
+    spin.current.velocity = 0;
+  };
   const go = useCallback(
     (delta: number, loop = false) => {
       setSelected(null);
+      resetSpin();
       setChapterIdx((i) => {
         const n = i + delta;
         if (loop) return (n + total) % total;
@@ -116,9 +135,45 @@ const Intro: React.FC = () => {
     [total]
   );
 
+  const requestFly = useCallback((req: Omit<FlyRequest, "seq">) => {
+    flySeq.current += 1;
+    setFly({ seq: flySeq.current, ...req });
+  }, []);
+
+  const select = useCallback(
+    (m: FamilyMember | null) => {
+      setSelected(m);
+      if (m && mode === "explore") {
+        setActiveGen(null);
+        requestFly({ id: m.id });
+      }
+    },
+    [mode, requestFly]
+  );
+
+  const enterExplore = () => {
+    setMode("explore");
+    setSelected(null);
+    setActiveGen(null);
+    if (!hintShown.current) {
+      hintShown.current = true;
+      setHint(panel === "left" ? "Kéo chuột để xoay · Cuộn để phóng · Chuột phải để dời · Bấm vào người để xem" : "Kéo để xoay · Chụm hai ngón để phóng · Chạm vào người để xem");
+      window.setTimeout(() => setHint(null), 4500);
+    }
+  };
+  const exitExplore = () => {
+    setMode("story");
+    setActiveGen(null);
+    setFly(null);
+    setSelected(null);
+    resetSpin();
+  };
+
+  // Cử chỉ ở chế độ hành trình: cuộn/vuốt dọc sang chương, kéo ngang xoay cây. Khám phá: OrbitControls tự xử lý.
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
+    if (exploring) return;
     let acc = 0;
     let lock = 0;
     const onWheel = (e: WheelEvent) => {
@@ -135,42 +190,130 @@ const Intro: React.FC = () => {
         lock = now + 900;
       }
     };
+
+    const spinRate = () => (Math.PI * 2) / Math.max(320, window.innerHeight) * 0.9;
+    // Chuột: kéo ngang xoay cây
+    let mouseDown = false;
+    let lastX = 0;
+    let lastT = 0;
+    let vel = 0;
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0 || isInteractive(e.target)) return;
+      mouseDown = true;
+      lastX = e.clientX;
+      lastT = performance.now();
+      vel = 0;
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      if (!mouseDown) return;
+      const dx = e.clientX - lastX;
+      const now = performance.now();
+      const dt = Math.max(1, now - lastT) / 1000;
+      lastX = e.clientX;
+      lastT = now;
+      if (Math.abs(dx) > 0) {
+        spin.current.dragging = true;
+        spin.current.offset += dx * spinRate();
+        vel = (dx * spinRate()) / dt;
+      }
+    };
+    const onMouseUp = () => {
+      if (!mouseDown) return;
+      mouseDown = false;
+      if (spin.current.dragging) {
+        spin.current.dragging = false;
+        spin.current.velocity = Math.max(-6, Math.min(6, vel * 0.6));
+      }
+    };
+
+    // Chạm: vuốt dọc nhanh sang chương; kéo ngang xoay cây
     let startY = 0;
     let startX = 0;
     let startT = 0;
+    let touchLastX = 0;
+    let touchLastT = 0;
+    let touchVel = 0;
+    let horizontal = false;
+    let fromInteractive = false;
     const onTouchStart = (e: TouchEvent) => {
       startY = e.touches[0].clientY;
       startX = e.touches[0].clientX;
+      touchLastX = startX;
       startT = Date.now();
+      touchLastT = performance.now();
+      touchVel = 0;
+      horizontal = false;
+      fromInteractive = isInteractive(e.target);
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (fromInteractive || e.touches.length !== 1) return;
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      if (!horizontal) {
+        const dx = x - startX;
+        const dy = y - startY;
+        if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+          horizontal = true;
+          spin.current.dragging = true;
+        }
+      }
+      if (horizontal) {
+        const dx = x - touchLastX;
+        const now = performance.now();
+        const dt = Math.max(1, now - touchLastT) / 1000;
+        touchLastX = x;
+        touchLastT = now;
+        spin.current.offset += dx * spinRate();
+        touchVel = (dx * spinRate()) / dt;
+      }
     };
     const onTouchEnd = (e: TouchEvent) => {
+      if (horizontal) {
+        horizontal = false;
+        spin.current.dragging = false;
+        spin.current.velocity = Math.max(-6, Math.min(6, touchVel * 0.6));
+        return;
+      }
       const dy = startY - e.changedTouches[0].clientY;
       const dx = startX - e.changedTouches[0].clientX;
-      if (Date.now() - startT > 800) return;
+      if (Date.now() - startT > 1000) return;
       if (Math.abs(dy) > 50 && Math.abs(dy) > Math.abs(dx) * 1.2) go(dy > 0 ? 1 : -1);
-      else if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.2) go(dx > 0 ? 1 : -1);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
     el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
     el.addEventListener("touchend", onTouchEnd, { passive: true });
     return () => {
       el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
       el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
       el.removeEventListener("touchend", onTouchEnd);
+      spin.current.dragging = false;
     };
-  }, [go]);
+  }, [go, exploring]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement | null)?.tagName === "INPUT") return;
+      if (e.key === "Escape") {
+        if (selected) setSelected(null);
+        else if (presenting) stopPresenting();
+        else if (exploring) exitExplore();
+        return;
+      }
+      if (exploring) return;
       if (["ArrowDown", "PageDown", " ", "ArrowRight"].includes(e.key)) {
         e.preventDefault();
         go(1);
       } else if (["ArrowUp", "PageUp", "ArrowLeft"].includes(e.key)) {
         e.preventDefault();
         go(-1);
-      } else if (e.key === "Escape") {
-        if (selected) setSelected(null);
-        else if (presenting) stopPresenting();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -179,9 +322,11 @@ const Intro: React.FC = () => {
 
   // ---------- presentation
   const startPresenting = async () => {
+    if (exploring) exitExplore();
     setPresenting(true);
     setSelected(null);
     setChapterIdx(0);
+    resetSpin();
     const el = rootRef.current as FsElement | null;
     try {
       if (el?.requestFullscreen) await el.requestFullscreen();
@@ -288,13 +433,14 @@ const Intro: React.FC = () => {
       ro.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [panel, presenting, chapterIdx]);
+  }, [panel, presenting, chapterIdx, exploring]);
 
   // ---------- render helpers
   const panelClass =
     panel === "left"
-      ? "absolute left-6 lg:left-12 top-1/2 -translate-y-1/2 w-[min(460px,40vw)]"
-      : "absolute inset-x-0 bottom-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]";
+      ? "absolute z-[35] left-6 lg:left-12 top-1/2 -translate-y-1/2 w-[min(460px,40vw)]"
+      : "absolute z-[35] inset-x-0 bottom-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]";
+  const parentOfSelected = selected ? members.find((m) => m.id === selected.fatherId) || members.find((m) => m.id === selected.motherId) : undefined;
 
   if (!webgl) return <StaticIntro members={members} />;
 
@@ -315,7 +461,12 @@ const Intro: React.FC = () => {
               reducedMotion={reducedMotion}
               insets={insets}
               selectedId={selected?.id ?? null}
-              onSelect={setSelected}
+              onSelect={select}
+              mode={mode}
+              spin={spin}
+              fly={fly}
+              activeGen={activeGen}
+              onInteract={() => setActiveGen(null)}
             />
           </Suspense>
         )}
@@ -325,93 +476,132 @@ const Intro: React.FC = () => {
         )}
       </div>
 
-      {/* Chữ chương */}
-      <div ref={panelRef} className={`${panelClass} pointer-events-none`}>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={chapter.id}
-            initial={{ opacity: 0, y: 24, filter: "blur(6px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: -16, filter: "blur(6px)" }}
-            transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-            className={`intro-card pointer-events-auto ${panel === "bottom" ? "intro-card-bottom" : ""}`}
-            data-scrollable
-          >
-            <div className="flex items-center gap-3 mb-3">
-              <span className="intro-kicker">{chapter.kicker}</span>
-              <span className="h-px flex-1 bg-gradient-to-r from-[#f6c35b]/50 to-transparent" />
-              <span className="text-[11px] tracking-[0.25em] text-[#f6c35b]/70 tabular-nums">
-                {String(chapterIdx + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
-              </span>
-            </div>
-            <h1 className="intro-title">{chapter.title}</h1>
-            <p className="intro-body">{body}</p>
+      {/* Chữ chương (hành trình) */}
+      {!exploring && (
+        <div ref={panelRef} className={`${panelClass} pointer-events-none`}>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={chapter.id}
+              initial={{ opacity: 0, y: 24, filter: "blur(6px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              exit={{ opacity: 0, y: -16, filter: "blur(6px)" }}
+              transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+              className={`intro-card pointer-events-auto ${panel === "bottom" ? "intro-card-bottom" : ""}`}
+              data-scrollable
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <span className="intro-kicker">{chapter.kicker}</span>
+                <span className="h-px flex-1 bg-gradient-to-r from-[#f6c35b]/50 to-transparent" />
+                <span className="text-[11px] tracking-[0.25em] text-[#f6c35b]/70 tabular-nums">
+                  {String(chapterIdx + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
+                </span>
+              </div>
+              <h1 className="intro-title">{chapter.title}</h1>
+              <p className="intro-body">{body}</p>
 
-            {chapter.id === "sum-sue" && stats.totalMembers > 0 && (
-              <div className="grid grid-cols-3 gap-2 mt-5">
-                {[
-                  { v: stats.generations, l: "Thế hệ" },
-                  { v: stats.totalMembers, l: "Thành viên" },
-                  { v: stats.alive, l: "Còn sống" },
-                ].map((s) => (
-                  <div key={s.l} className="rounded-xl border border-[#f6c35b]/25 bg-black/20 px-3 py-2 text-center">
-                    <div className="font-serif text-2xl sm:text-3xl text-[#ffe7a8]">{s.v}</div>
-                    <div className="text-[10px] uppercase tracking-[0.18em] text-[#f5ead6]/60">{s.l}</div>
+              {chapter.id === "sum-sue" && stats.totalMembers > 0 && (
+                <div className="grid grid-cols-3 gap-2 mt-5">
+                  {[
+                    { v: stats.generations, l: "Thế hệ" },
+                    { v: stats.totalMembers, l: "Thành viên" },
+                    { v: stats.alive, l: "Còn sống" },
+                  ].map((s) => (
+                    <div key={s.l} className="rounded-xl border border-[#f6c35b]/25 bg-black/20 px-3 py-2 text-center">
+                      <div className="font-serif text-2xl sm:text-3xl text-[#ffe7a8]">{s.v}</div>
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-[#f5ead6]/60">{s.l}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {chapter.cta && !presenting && (
+                <div className="flex flex-wrap gap-2 mt-6">
+                  <button onClick={enterExplore} className="intro-btn intro-btn-primary">
+                    <Orbit className="w-4 h-4" /> Khám phá cây 3D
+                  </button>
+                  <Link to="/tree" className="intro-btn">
+                    <Network className="w-4 h-4" /> Cây gia phả
+                  </Link>
+                  <Link to="/members" className="intro-btn">
+                    <Users className="w-4 h-4" /> Danh sách
+                  </Link>
+                </div>
+              )}
+
+              {chapterIdx === 0 && !presenting && (
+                <div className="mt-6 space-y-2 text-xs text-[#f5ead6]/55">
+                  <div className="intro-legend">
+                    <span className="intro-dot" /> Tiền nhân
+                    <span className="intro-dot intro-dot-alive ml-2" /> Đang sống
                   </div>
-                ))}
-              </div>
-            )}
+                  <div className="flex items-center gap-2">
+                    <ChevronDown className="w-4 h-4 animate-bounce shrink-0" />
+                    {panel === "left" ? "Cuộn chuột để tiếp tục · Kéo ngang để xoay cây" : "Vuốt lên để tiếp tục · Kéo ngang để xoay cây · Chạm ánh sáng để xem tên"}
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      )}
 
-            {chapter.cta && !presenting && (
-              <div className="flex flex-wrap gap-2 mt-6">
-                <Link to="/tree" className="intro-btn intro-btn-primary">
-                  <Network className="w-4 h-4" /> Khám phá Cây gia phả
-                </Link>
-                <Link to="/members" className="intro-btn">
-                  <Users className="w-4 h-4" /> Xem danh sách
-                </Link>
-              </div>
-            )}
-
-            {chapterIdx === 0 && !presenting && (
-              <div className="mt-6 flex items-center gap-2 text-xs text-[#f5ead6]/55">
-                <ChevronDown className="w-4 h-4 animate-bounce" />
-                {panel === "left" ? "Cuộn chuột hoặc dùng phím mũi tên để tiếp tục" : "Vuốt lên để tiếp tục, chạm vào đốm sáng để xem tên"}
-              </div>
-            )}
+      {/* Thanh Khám phá */}
+      {exploring && (
+        <ExploreBar
+          members={members}
+          minGen={layout.minGen}
+          maxGen={layout.maxGen}
+          activeGen={activeGen}
+          onPickMember={(m) => select(m)}
+          onPickGen={(g) => {
+            setActiveGen(g);
+            setSelected(null);
+            if (g != null) requestFly({ gen: g });
+          }}
+          onExit={exitExplore}
+          compact={panel === "bottom"}
+        />
+      )}
+      <AnimatePresence>
+        {hint && exploring && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="intro-hint">
+            {hint}
           </motion.div>
-        </AnimatePresence>
-      </div>
+        )}
+      </AnimatePresence>
 
       {/* Chấm chương */}
-      <div
-        className={`absolute transition-opacity duration-500 ${controlsVisible ? "opacity-100" : "opacity-0"} ${
-          panel === "left"
-            ? "right-5 top-1/2 -translate-y-1/2 flex flex-col gap-3"
-            : `left-4 flex gap-2.5 items-center h-10 ${presenting ? "top-4" : "top-[5rem]"}`
-        }`}
-      >
-        {INTRO_CHAPTERS.map((c, i) => (
-          <button
-            key={c.id}
-            onClick={() => {
-              setSelected(null);
-              setChapterIdx(i);
-            }}
-            aria-label={c.title}
-            title={c.title}
-            className={`rounded-full transition-all ${
-              i === chapterIdx ? "bg-[#f6c35b] shadow-[0_0_12px_#f6c35b] w-2.5 h-2.5 scale-125" : "bg-white/30 hover:bg-white/60 w-2.5 h-2.5"
-            }`}
-          />
-        ))}
-      </div>
+      {!exploring && (
+        <div
+          className={`absolute z-[40] transition-opacity duration-500 ${controlsVisible ? "opacity-100" : "opacity-0"} ${
+            panel === "left"
+              ? "right-5 top-1/2 -translate-y-1/2 flex flex-col gap-3"
+              : `left-4 flex gap-2.5 items-center h-10 ${presenting ? "top-4" : "top-[5rem]"}`
+          }`}
+        >
+          {INTRO_CHAPTERS.map((c, i) => (
+            <button
+              key={c.id}
+              onClick={() => {
+                setSelected(null);
+                resetSpin();
+                setChapterIdx(i);
+              }}
+              aria-label={c.title}
+              title={c.title}
+              className={`rounded-full transition-all ${
+                i === chapterIdx ? "bg-[#f6c35b] shadow-[0_0_12px_#f6c35b] w-2.5 h-2.5 scale-125" : "bg-white/30 hover:bg-white/60 w-2.5 h-2.5"
+              }`}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Nút điều khiển */}
       <div
-        className={`absolute right-4 sm:right-6 flex items-center gap-2 transition-opacity duration-500 ${
+        className={`absolute z-[40] right-4 sm:right-6 flex items-center gap-2 transition-opacity duration-500 ${
           presenting ? "top-4" : "top-[5rem]"
-        } ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        } ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"} ${exploring && panel === "bottom" ? "hidden" : ""}`}
       >
         {musicUrl && (
           <button onClick={toggleMusic} className="intro-icon-btn" aria-label={musicOn ? "Tắt nhạc" : "Bật nhạc"} title={musicOn ? "Tắt nhạc" : "Bật nhạc"}>
@@ -422,16 +612,26 @@ const Intro: React.FC = () => {
           <button onClick={stopPresenting} className="intro-btn">
             <Minimize2 className="w-4 h-4" /> Thoát
           </button>
-        ) : (
-          <button onClick={startPresenting} className="intro-btn intro-btn-primary">
-            <Maximize2 className="w-4 h-4" /> Trình chiếu
+        ) : exploring ? (
+          <button onClick={exitExplore} className="intro-btn">
+            <Compass className="w-4 h-4" /> Về hành trình
           </button>
+        ) : (
+          <>
+            <button onClick={enterExplore} className="intro-btn" title="Xoay, phóng và đi tới từng người trên cây">
+              <Orbit className="w-4 h-4" /> <span className="hidden sm:inline">Khám phá 3D</span>
+              <span className="sm:hidden">3D</span>
+            </button>
+            <button onClick={startPresenting} className="intro-btn intro-btn-primary">
+              <Maximize2 className="w-4 h-4" /> Trình chiếu
+            </button>
+          </>
         )}
       </div>
 
       {/* Trước / sau cho màn dọc */}
-      {panel === "bottom" && controlsVisible && (
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-2">
+      {panel === "bottom" && controlsVisible && !exploring && (
+        <div className="absolute z-[40] right-3 top-1/2 -translate-y-1/2 flex flex-col gap-2">
           <button onClick={() => go(-1)} disabled={chapterIdx === 0} className="intro-icon-btn disabled:opacity-30" aria-label="Chương trước">
             <ChevronUp className="w-4 h-4" />
           </button>
@@ -449,24 +649,33 @@ const Intro: React.FC = () => {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             className={`absolute intro-card intro-member-card ${
-              panel === "left" ? "right-14 bottom-8 w-[320px]" : "left-4 right-4 sm:left-auto sm:w-[360px] top-[8.5rem]"
+              panel === "left" ? "right-14 bottom-8 w-[320px]" : `left-4 right-4 sm:left-auto sm:w-[360px] ${exploring ? "bottom-[max(1rem,env(safe-area-inset-bottom))]" : "top-[8.5rem]"}`
             }`}
           >
             <button onClick={() => setSelected(null)} className="absolute right-3 top-3 text-[#f5ead6]/60 hover:text-white" aria-label="Đóng">
               <X className="w-4 h-4" />
             </button>
-            <div className="intro-kicker mb-1">Đời thứ {selected.generation}</div>
+            <div className="intro-kicker mb-1 flex items-center gap-2">
+              <span className={`intro-dot ${isAlive(selected) ? "intro-dot-alive" : ""}`} /> Đời thứ {selected.generation}
+            </div>
             <div className="font-serif text-2xl text-[#ffe7a8] pr-6">{selected.name}</div>
             <div className="text-xs text-[#f5ead6]/60 mt-1">
               {selected.gender} · {STATUS_LABEL[selected.status || "Deceased"]}
               {selected.spouse ? ` · Phối ngẫu: ${selected.spouse}` : ""}
             </div>
             {selected.biography && <p className="text-sm text-[#f5ead6]/85 mt-3 leading-relaxed line-clamp-4">{selected.biography}</p>}
-            {!presenting && (
-              <Link to={`/tree?highlight=${selected.id}`} className="inline-flex items-center gap-1.5 mt-4 text-sm text-[#f6c35b] hover:underline">
-                Xem trên cây gia phả <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            )}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-4 text-sm">
+              {exploring && parentOfSelected && (
+                <button onClick={() => select(parentOfSelected)} className="inline-flex items-center gap-1.5 text-[#f6c35b] hover:underline">
+                  <ArrowUpFromLine className="w-3.5 h-3.5" /> Bay tới {parentOfSelected.gender === "Nữ" ? "mẹ" : "cha"}: {parentOfSelected.name}
+                </button>
+              )}
+              {!presenting && (
+                <Link to={`/tree?highlight=${selected.id}`} className="inline-flex items-center gap-1.5 text-[#f6c35b] hover:underline">
+                  Xem trên cây gia phả <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

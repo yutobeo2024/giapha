@@ -56,6 +56,9 @@ export interface UserDoc {
   lastLogin?: { toDate: () => Date } | null;
 }
 
+/** Thiếu trạng thái thì coi như đã mất (dữ liệu cũ phần lớn là tiền nhân) */
+export const isAlive = (m: Pick<FamilyMember, "status">): boolean => m.status === "Alive";
+
 export const STATUS_LABEL: Record<MemberStatus, string> = {
   Alive: "Còn sống",
   Deceased: "Đã mất",
