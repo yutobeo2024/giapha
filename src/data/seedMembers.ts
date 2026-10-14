@@ -1,7 +1,7 @@
 import type { MemberInput } from "../types";
 
 /**
- * Dữ liệu gốc 22 đời họ Nguyễn Nhuận (92 thành viên), dùng cho nút "Nạp dữ liệu gốc" ở trang Quản trị.
+ * Dữ liệu gốc đời 1 đến 12 họ Nguyễn Nhuận (81 thành viên). Đời 13 trở đi sẽ nhập tay trong trang Quản trị, dùng cho nút "Nạp dữ liệu gốc" ở trang Quản trị.
  * id là document id cố định trong collection members để fatherId tham chiếu được.
  */
 export interface SeedMember extends MemberInput {
@@ -130,34 +130,13 @@ export const SEED_MEMBERS: SeedMember[] = [
   { id: "nguyen-nhuan-minh-gen12", name: "Nguyễn Nhuận Minh", generation: 12, gender: "Nam", status: "Alive", fatherId: "nguyen-nhuan-truong" },
   { id: "nguyen-trong-anh", name: "Nguyễn Trọng Anh", generation: 12, gender: "Nam", status: "Alive", fatherId: "nguyen-trong-hung" },
   
-  // Gen 13
-  { id: "nguyen-phuc-thanh-gen13", name: "Nguyễn Phúc Thành", generation: 13, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-loc" },
-  { id: "nguyen-nhuan-dung-gen13", name: "Nguyễn Nhuận Dũng", generation: 13, gender: "Nam", status: "Alive", fatherId: "nguyen-nhuan-minh-gen12" },
   
-  // Gen 14
-  { id: "nguyen-phuc-duy", name: "Nguyễn Phúc Duy", generation: 14, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-thanh-gen13" },
   
-  // Gen 15
-  { id: "nguyen-phuc-hoang", name: "Nguyễn Phúc Hoàng", generation: 15, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-duy" },
 
-  // Gen 16
-  { id: "nguyen-phuc-lam", name: "Nguyễn Phúc Lâm", generation: 16, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-hoang" },
   
-  // Gen 17
-  { id: "nguyen-phuc-son", name: "Nguyễn Phúc Sơn", generation: 17, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-lam" },
   
-  // Gen 18
-  { id: "nguyen-phuc-hai-gen18", name: "Nguyễn Phúc Hải", generation: 18, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-son" },
   
-  // Gen 19
-  { id: "nguyen-phuc-quan", name: "Nguyễn Phúc Quân", generation: 19, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-hai-gen18" },
   
-  // Gen 20
-  { id: "nguyen-phuc-tu", name: "Nguyễn Phúc Tú", generation: 20, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-quan" },
   
-  // Gen 21
-  { id: "nguyen-phuc-khoi", name: "Nguyễn Phúc Khôi", generation: 21, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-tu" },
   
-  // Gen 22 - The youngest generation
-  { id: "nguyen-phuc-an", name: "Nguyễn Phúc An", generation: 22, gender: "Nam", status: "Alive", fatherId: "nguyen-phuc-khoi" },
 ];

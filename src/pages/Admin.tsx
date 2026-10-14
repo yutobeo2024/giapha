@@ -285,7 +285,7 @@ const Admin: React.FC = () => {
         batch.set(doc(db, "members", id), clean(data), { merge: true });
       }
       await batch.commit();
-      await logActivity(`đã nạp dữ liệu gốc (${SEED_MEMBERS.length} thành viên, 22 đời)`);
+      await logActivity(`đã nạp dữ liệu gốc (${SEED_MEMBERS.length} thành viên, 12 đời)`);
       setMessage({ type: "success", text: `Đã nạp ${SEED_MEMBERS.length} thành viên.` });
     } catch (err) {
       setMessage({ type: "error", text: handleFirestoreError(err, OperationType.WRITE, "members") });
@@ -324,7 +324,7 @@ const Admin: React.FC = () => {
               onClick={() => setShowSeedConfirm(true)}
               disabled={loading}
               className="flex items-center gap-2 px-4 py-3 bg-white border border-[#E5E1D8] text-[#6B665F] rounded-xl font-bold hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
-              title="Nạp 92 thành viên 22 đời từ dữ liệu gốc (ghi đè theo id, không xóa dữ liệu khác)"
+              title={`Nạp ${SEED_MEMBERS.length} thành viên đời 1-12 từ dữ liệu gốc (ghi đè theo id, không xóa dữ liệu khác)`}
             >
               <Download className="w-4 h-4" />
               Nạp dữ liệu gốc
@@ -981,7 +981,7 @@ const Admin: React.FC = () => {
             </div>
             <h3 className="text-2xl font-serif font-bold text-[#2D2A26] text-center mb-2">Nạp dữ liệu gốc</h3>
             <p className="text-[#6B665F] text-center mb-8 text-sm">
-              Sẽ ghi {SEED_MEMBERS.length} thành viên (22 đời) vào hệ thống theo id cố định. Thành viên trùng id sẽ được
+              Sẽ ghi {SEED_MEMBERS.length} thành viên (12 đời) vào hệ thống theo id cố định. Thành viên trùng id sẽ được
               cập nhật các trường có trong dữ liệu gốc, các trường khác (ảnh, địa chỉ bạn đã nhập) được giữ nguyên.
             </p>
             <div className="grid grid-cols-2 gap-4">
