@@ -58,6 +58,7 @@ export function makeLeafMaterial(): THREE.ShaderMaterial {
       varying vec3 vColor; varying vec2 vUv; varying vec3 vNormal; varying vec3 vView;
       float halfWidth(float t) { return 0.5 * pow(sin(3.14159265 * pow(clamp(t, 0.0, 1.0), 0.78)), 0.9); }
       void main() {
+        if (vUv.y > 0.2) { gl_FragColor = vec4(vec3(0.2, 0.11, 0.06) + vColor * 0.03, 1.0); return; }
         float t = clamp(-vUv.y, 0.0, 1.0);
         float w = max(halfWidth(t), 0.02);
         float edge = clamp(1.0 - abs(vUv.x) / w, 0.0, 1.0);
@@ -68,7 +69,7 @@ export function makeLeafMaterial(): THREE.ShaderMaterial {
         vec3 rim = vColor * vec3(0.2, 0.4, 0.33);
         vec3 body = mix(rim, vColor, pow(edge, 0.6) * (0.55 + 0.45 * f));
         vec3 glow = vec3(0.86, 1.0, 0.94);
-        vec3 c = body + glow * (mid * 0.95 + side * 0.45) + vColor * pow(edge, 3.0) * 0.55;
+        vec3 c = body + glow * (mid * 0.5 + side * 0.22) + vColor * pow(edge, 3.0) * 0.45;
         gl_FragColor = vec4(c, 1.0);
       }`,
   });
@@ -140,30 +141,35 @@ export function makeFireflyMaterial(opts: { spiral: boolean; colorA: THREE.Color
   });
 }
 
-/** Nhiễu GLSL dùng cho vỏ cây (value noise 3D + fbm 3 tầng) */
-const GLSL_NOISE = `
-  float barkHash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-  float barkNoise(vec3 x) {
-    vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(mix(barkHash(i), barkHash(i + vec3(1,0,0)), f.x), mix(barkHash(i + vec3(0,1,0)), barkHash(i + vec3(1,1,0)), f.x), f.y),
-               mix(mix(barkHash(i + vec3(0,0,1)), barkHash(i + vec3(1,0,1)), f.x), mix(barkHash(i + vec3(0,1,1)), barkHash(i + vec3(1,1,1)), f.x), f.y), f.z);
-  }
-  float barkFbm(vec3 p) { return 0.5 * barkNoise(p) + 0.25 * barkNoise(p * 2.03 + 7.1) + 0.125 * barkNoise(p * 4.1 + 3.7); }
-`;
-
 /**
- * Vật liệu vỏ cây: nền gỗ chuẩn (MeshStandardMaterial) thêm vân vỏ theo tọa độ thế giới (kéo dài theo chiều dọc),
- * rãnh vỏ phát sáng vàng ấm và các dải sáng chạy từ gốc lên ngọn ("nhựa sống" của dòng họ).
+ * Vật liệu vỏ cây: màu + normal map rãnh vỏ (texture lặp, tính bằng canvas), rãnh phát sáng vàng ấm
+ * và các dải sáng chạy từ gốc lên ngọn ("nhựa sống" của dòng họ). Hiệu ứng mọc dần: điểm nào có
+ * đời (attribute aGen) lớn hơn uVisibleGen thì chưa vẽ.
  */
-export function makeBarkMaterial(time: { value: number }): THREE.MeshStandardMaterial {
-  const mat = new THREE.MeshStandardMaterial({ color: "#8a5832", roughness: 0.8, metalness: 0.18, emissive: "#5c2c12", emissiveIntensity: 0.8 });
+export function makeBarkMaterial(
+  uniforms: { time: { value: number }; visibleGen: { value: number } },
+  tex: { map: THREE.Texture; normalMap: THREE.Texture; height: THREE.Texture }
+): THREE.MeshStandardMaterial {
+  const mat = new THREE.MeshStandardMaterial({
+    map: tex.map,
+    normalMap: tex.normalMap,
+    normalScale: new THREE.Vector2(1.35, 1.35),
+    color: "#ffffff",
+    roughness: 0.93,
+    metalness: 0.03,
+    emissive: "#1f1006",
+    emissiveIntensity: 0.5,
+  });
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = time;
+    shader.uniforms.uTime = uniforms.time;
+    shader.uniforms.uVisibleGen = uniforms.visibleGen;
+    shader.uniforms.uHeight = { value: tex.height };
     shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nvarying vec3 vWPos;")
+      .replace("#include <common>", "#include <common>\nattribute float aGen; varying float vGen; varying vec3 vWPos;")
       .replace(
         "#include <worldpos_vertex>",
         `#include <worldpos_vertex>
+        vGen = aGen;
         vec4 barkWp = vec4(transformed, 1.0);
         #ifdef USE_INSTANCING
           barkWp = instanceMatrix * barkWp;
@@ -171,20 +177,15 @@ export function makeBarkMaterial(time: { value: number }): THREE.MeshStandardMat
         vWPos = (modelMatrix * barkWp).xyz;`
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", "#include <common>\nvarying vec3 vWPos; uniform float uTime;\n" + GLSL_NOISE)
-      .replace(
-        "#include <roughnessmap_fragment>",
-        `#include <roughnessmap_fragment>
-        float bn = barkFbm(vWPos * vec3(2.4, 0.65, 2.4));
-        roughnessFactor = clamp(roughnessFactor * (0.75 + 0.5 * bn), 0.0, 1.0);`
-      )
+      .replace("#include <common>", "#include <common>\nvarying float vGen; varying vec3 vWPos; uniform float uTime; uniform float uVisibleGen; uniform sampler2D uHeight;")
+      .replace("#include <clipping_planes_fragment>", "#include <clipping_planes_fragment>\n  if (vGen > uVisibleGen) discard;")
       .replace(
         "#include <emissivemap_fragment>",
         `#include <emissivemap_fragment>
-        float crack = smoothstep(0.56, 0.86, bn);
-        float pulse = pow(0.5 + 0.5 * sin((vWPos.y * 0.85 - uTime * 1.3) + bn * 5.0), 7.0);
-        totalEmissiveRadiance += vec3(1.0, 0.58, 0.2) * crack * (0.45 + pulse * 1.6);
-        diffuseColor.rgb *= 0.7 + 0.5 * bn;`
+        float bh = texture2D(uHeight, vMapUv).r;
+        float furrow = smoothstep(0.45, 0.08, bh);
+        float pulse = pow(0.5 + 0.5 * sin((vWPos.y * 0.85 - uTime * 1.3) + bh * 6.0), 7.0);
+        totalEmissiveRadiance += vec3(1.0, 0.56, 0.18) * furrow * (0.12 + pulse * 1.1);`
       );
   };
   return mat;

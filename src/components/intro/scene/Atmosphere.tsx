@@ -127,7 +127,7 @@ function SceneLights({ layout, reduced }: { layout: TreeLayout; reduced: boolean
   });
   return (
     <>
-      <ambientLight intensity={0.45} color="#ffd9a8" />
+      <ambientLight intensity={0.52} color="#ffd9a8" />
       <hemisphereLight args={["#7b8cff", "#6a2414", 0.6]} />
       <pointLight ref={heart} position={[0, layout.trunk.topY + 0.4, 0]} intensity={70} distance={30} decay={2} color="#ffb04a" />
       <pointLight position={[0, layout.groundY + 1.3, 0]} intensity={42} distance={16} decay={2} color="#ff9a3c" />

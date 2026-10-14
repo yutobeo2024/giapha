@@ -4,7 +4,7 @@ import { OrbitControls } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import * as THREE from "three";
 import type { TreeLayout } from "../../../lib/treeLayout3d";
-import { isAlive } from "../../../types";
+import { visualCenter } from "./MemberLights";
 import { easeInOutCubic, type FlyRequest } from "./constants";
 import type { CameraHandoff } from "./CameraRig";
 
@@ -70,7 +70,7 @@ export default function ExploreControls({ layout, handoff, fly, reduced, onNearb
     if (fly.id) {
       const n = layout.byId.get(fly.id);
       if (!n) return;
-      toT.set(n.position[0], n.position[1] - (isAlive(n.member) ? 0.25 : 0), n.position[2]);
+      toT.set(...visualCenter(n));
       const out = new THREE.Vector3(n.position[0], 0, n.position[2]);
       if (out.lengthSq() < 0.09) out.copy(camDir);
       out.normalize();

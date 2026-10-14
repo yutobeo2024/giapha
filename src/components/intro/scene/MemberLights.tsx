@@ -1,13 +1,19 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { FamilyMember } from "../../../types";
 import { isAlive } from "../../../types";
 import type { TreeLayout, LayoutNode } from "../../../lib/treeLayout3d";
 import { makeOrbMaterial, makeLeafMaterial, leafHalfWidth } from "./shaders";
 import { GOLD, GOLD_HIGHLIGHT, JADE, JADE_HIGHLIGHT, easeOutCubic } from "./constants";
 
-/** Hình chiếc lá: viền theo leafHalfWidth (trùng với shader gân lá), ép mỏng, lòng lá hơi cong */
+/** Chiều dài cuống lá (đơn vị hình lá, trước khi nhân tỉ lệ) */
+const PETIOLE = 0.3;
+/** Tỉ lệ đèn lá */
+const LEAF_SCALE = 0.7;
+
+/** Hình chiếc lá có cuống: viền theo leafHalfWidth (trùng với shader gân lá), ép mỏng, lòng lá hơi cong; cuống nối lên nút trên cành */
 function leafGeometry(): THREE.BufferGeometry {
   const shape = new THREE.Shape();
   const N = 26;
@@ -25,12 +31,30 @@ function leafGeometry(): THREE.BufferGeometry {
   pos.needsUpdate = true;
   geo.computeVertexNormals();
   geo.translate(0, 0, -0.025);
-  return geo;
+  // Cuống: ống mảnh từ nút (y = PETIOLE) xuống đầu lá (y = 0), hơi cong về phía trước
+  const stem = new THREE.CylinderGeometry(0.022, 0.03, PETIOLE, 6, 3, false);
+  stem.translate(0, PETIOLE / 2, 0);
+  const sp = stem.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < sp.count; i++) {
+    const t = sp.getY(i) / PETIOLE;
+    sp.setZ(i, sp.getZ(i) + 0.05 * Math.sin(Math.PI * t));
+  }
+  const su = stem.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < su.count; i++) su.setXY(i, 0, 0.6);
+  stem.computeVertexNormals();
+  // ExtrudeGeometry không có chỉ mục, cuống phải bỏ chỉ mục thì mới ghép được
+  const stemFlat = stem.toNonIndexed();
+  const merged = mergeGeometries([geo, stemFlat], false);
+  geo.dispose();
+  stem.dispose();
+  if (!merged) return geo.clone();
+  stemFlat.dispose();
+  return merged;
 }
 
 /** Vị trí tâm hình ảnh của một người (đèn lá treo thấp hơn nút một chút) */
 export function visualCenter(n: LayoutNode): [number, number, number] {
-  return isAlive(n.member) ? [n.position[0], n.position[1] - 0.3, n.position[2]] : n.position;
+  return isAlive(n.member) ? [n.position[0], n.position[1] - (PETIOLE + 0.5) * LEAF_SCALE, n.position[2]] : n.position;
 }
 
 interface Props {
@@ -74,18 +98,18 @@ export default function MemberLights({ layout, highlightIds, selectedId, hoverId
   /** Kích thước và vị trí đốm ngọc: nằm trên thân/cành to thì thành viên ngọc gắn trên vỏ, Thủy tổ là trái tim lớn ở đỉnh thân */
   const orbPlacement = (n: LayoutNode): { pos: [number, number, number]; scale: number } => {
     const g = n.member.generation - layout.minGen;
-    if (n.isRoot) return { pos: [n.position[0], n.position[1] + 0.3, n.position[2]], scale: layout.trunk.topRadius * 1.15 };
-    if (n.woodRadius > 0.3) {
-      // Viên ngọc gắn trên vỏ thân/cành to, lệch góc theo từng người để không xếp thẳng hàng một phía
+    if (n.isRoot) return { pos: [n.position[0], n.position[1] + 0.3, n.position[2]], scale: layout.trunk.topRadius * 1.22 };
+    if (n.woodRadius > 0) {
+      // Người có con: viên ngọc gắn nửa chìm trên vỏ cành, lệch góc theo từng người để không xếp thẳng hàng
       const a = Math.atan2(n.position[2], n.position[0]) + (((n.member.id.length * 7919) % 100) / 100 - 0.5) * 1.8;
-      const out = n.woodRadius * 0.92;
+      const out = n.woodRadius * 0.95;
       return {
-        pos: [n.position[0] + Math.cos(a) * out, n.position[1] + 0.05, n.position[2] + Math.sin(a) * out],
-        scale: THREE.MathUtils.clamp(n.woodRadius * 0.42, 0.18, 0.34) * emphasis(n.member.id),
+        pos: [n.position[0] + Math.cos(a) * out, n.position[1] + 0.03, n.position[2] + Math.sin(a) * out],
+        scale: THREE.MathUtils.clamp(n.woodRadius * 0.55, 0.12, 0.34) * emphasis(n.member.id),
       };
     }
-    const s = (0.11 + Math.min(0.04, g * 0.004)) * emphasis(n.member.id);
-    return { pos: n.position, scale: Math.max(s, n.woodRadius * 1.14) };
+    // Đầu cành: đốm sáng như quả ở ngọn
+    return { pos: n.position, scale: (0.125 + Math.min(0.04, g * 0.004)) * emphasis(n.member.id) };
   };
 
   // Màu từng đốm/đèn (cập nhật khi đổi chương / chọn)
@@ -154,9 +178,9 @@ export default function MemberLights({ layout, highlightIds, selectedId, hoverId
     if (leaf) {
       leafNodes.forEach((n, i) => {
         const ph = phaseOf(n);
-        const s = 0.7 * emphasis(n.member.id) * (reduced ? 1 : 1 + 0.05 * Math.sin(t * 1.6 + ph)) * appearOf(n);
-        dummy.position.set(n.position[0], n.position[1] - 0.03, n.position[2]);
-        dummy.rotation.set(0, Math.PI / 2 - n.angle, reduced ? 0 : 0.13 * Math.sin(t * 1.25 + ph));
+        const s = LEAF_SCALE * emphasis(n.member.id) * (reduced ? 1 : 1 + 0.05 * Math.sin(t * 1.6 + ph)) * appearOf(n);
+        dummy.position.set(n.position[0], n.position[1], n.position[2]);
+        dummy.rotation.set(0, Math.PI / 2 - n.angle, reduced ? 0 : 0.1 * Math.sin(t * 1.25 + ph));
         dummy.scale.set(s * 0.5, s, s);
         dummy.updateMatrix();
         leaf.setMatrixAt(i, dummy.matrix);
@@ -171,7 +195,7 @@ export default function MemberLights({ layout, highlightIds, selectedId, hoverId
       if (n && appearOf(n) > 0.5) {
         const alive = isAlive(n.member);
         const [x, y, z] = alive ? visualCenter(n) : orbPlacement(n).pos;
-        const base = alive ? 0.42 : orbPlacement(n).scale;
+        const base = alive ? 0.44 : orbPlacement(n).scale;
         ring.visible = true;
         ring.position.set(x, y, z);
         ring.quaternion.copy(camera.quaternion);

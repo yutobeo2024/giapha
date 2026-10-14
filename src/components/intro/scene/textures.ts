@@ -100,3 +100,100 @@ export function sealTextures(): { ring: THREE.Texture; glyph: THREE.Texture } {
   ring.anisotropy = glyph.anisotropy = 4;
   return { ring, glyph };
 }
+
+/**
+ * Vỏ cây lặp được (tileable): độ cao có rãnh chạy dọc theo chiều dài cành (trục u), màu nâu sẫm trong rãnh,
+ * sáng hơn trên gờ, và normal map tính từ độ cao để ánh sáng ăn vào rãnh.
+ */
+export function barkTextures(size = 256): { map: THREE.Texture; normalMap: THREE.Texture; height: THREE.Texture } {
+  // Value noise tuần hoàn trên lưới nx×ny ô: ảnh lặp không có đường nối
+  const lattice = (nx: number, ny: number, seed: number) => {
+    const grid = new Float32Array(nx * ny);
+    let s = seed;
+    const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < grid.length; i++) grid[i] = rnd();
+    const g = (i: number, j: number) => grid[(((j % ny) + ny) % ny) * nx + (((i % nx) + nx) % nx)];
+    return (u: number, v: number) => {
+      const x = u * nx;
+      const y = v * ny;
+      const x0 = Math.floor(x);
+      const y0 = Math.floor(y);
+      const fx = x - x0;
+      const fy = y - y0;
+      const sx = fx * fx * (3 - 2 * fx);
+      const sy = fy * fy * (3 - 2 * fy);
+      const top = g(x0, y0) + (g(x0 + 1, y0) - g(x0, y0)) * sx;
+      const bot = g(x0, y0 + 1) + (g(x0 + 1, y0 + 1) - g(x0, y0 + 1)) * sx;
+      return top + (bot - top) * sy;
+    };
+  };
+  const n1 = lattice(2, 20, 101);
+  const n2 = lattice(4, 40, 202);
+  const n3 = lattice(10, 80, 303);
+  const n4 = lattice(24, 24, 404);
+  const h = new Float32Array(size * size);
+  let mn = 1;
+  let mx = 0;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const v = y / size;
+      const warp = (n4(u, v) - 0.5) * 0.04;
+      const val = Math.pow(0.5 * n1(u, v + warp) + 0.3 * n2(u, v + warp) + 0.15 * n3(u, v) + 0.05 * n4(u * 2, v * 2), 1.15);
+      h[y * size + x] = val;
+      mn = Math.min(mn, val);
+      mx = Math.max(mx, val);
+    }
+  }
+  for (let i = 0; i < h.length; i++) h[i] = (h[i] - mn) / (mx - mn || 1);
+
+  const image = (fill: (x: number, y: number, out: number[]) => void) => {
+    const [c, g] = canvas(size);
+    const data = g.createImageData(size, size);
+    const out = [0, 0, 0];
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        fill(x, y, out);
+        const i = (y * size + x) * 4;
+        data.data[i] = out[0];
+        data.data[i + 1] = out[1];
+        data.data[i + 2] = out[2];
+        data.data[i + 3] = 255;
+      }
+    }
+    g.putImageData(data, 0, 0);
+    return c;
+  };
+  const clamp255 = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  const mapC = image((x, y, o) => {
+    const t = Math.pow(h[y * size + x], 1.1);
+    const speck = (n3((x + 13) / size, (y + 7) / size) - 0.5) * 14;
+    o[0] = clamp255(64 + 60 * t + speck);
+    o[1] = clamp255(41 + 38 * t + speck * 0.8);
+    o[2] = clamp255(26 + 20 * t + speck * 0.6);
+  });
+  const strength = 2.8;
+  const normalC = image((x, y, o) => {
+    const hl = h[y * size + ((x - 1 + size) % size)];
+    const hr = h[y * size + ((x + 1) % size)];
+    const hd = h[((y - 1 + size) % size) * size + x];
+    const hu = h[((y + 1) % size) * size + x];
+    const dx = (hr - hl) * strength;
+    const dy = (hu - hd) * strength;
+    const len = Math.hypot(dx, dy, 1);
+    o[0] = clamp255(((-dx / len) * 0.5 + 0.5) * 255);
+    o[1] = clamp255(((-dy / len) * 0.5 + 0.5) * 255);
+    o[2] = clamp255(((1 / len) * 0.5 + 0.5) * 255);
+  });
+  const heightC = image((x, y, o) => {
+    o[0] = o[1] = o[2] = clamp255(h[y * size + x] * 255);
+  });
+  const tex = (c: HTMLCanvasElement, srgb: boolean) => {
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    return t;
+  };
+  return { map: tex(mapC, true), normalMap: tex(normalC, false), height: tex(heightC, false) };
+}
