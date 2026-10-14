@@ -449,7 +449,7 @@ const Intro: React.FC = () => {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             className={`absolute intro-card intro-member-card ${
-              panel === "left" ? "right-14 bottom-8 w-[320px]" : "inset-x-4 top-[7.5rem]"
+              panel === "left" ? "right-14 bottom-8 w-[320px]" : "left-4 right-4 sm:left-auto sm:w-[360px] top-[8.5rem]"
             }`}
           >
             <button onClick={() => setSelected(null)} className="absolute right-3 top-3 text-[#f5ead6]/60 hover:text-white" aria-label="Đóng">

@@ -48,7 +48,6 @@
 /* ---------------- Trang Giới thiệu 3D (/gioi-thieu) ---------------- */
 .intro-root { -webkit-tap-highlight-color: transparent; }
 .intro-card {
-  position: relative;
   background: linear-gradient(160deg, rgba(20, 14, 28, 0.62), rgba(30, 10, 14, 0.5));
   border: 1px solid rgba(246, 195, 91, 0.22);
   border-radius: 24px;
