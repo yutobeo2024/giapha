@@ -91,5 +91,36 @@ console.cloud.google.com → **Credentials** → API key `Browser key (auto crea
 - Đăng nhập bằng Google account khác → thấy banner "chờ duyệt". Super admin bấm **Duyệt** → tài khoản kia thấy menu Quản trị ngay, không cần F5.
 - Trong Quản trị → Thêm thành viên → chọn ảnh → ảnh hiện với đường dẫn `/api/photos/...`.
 
+## Sao lưu và khôi phục
+
+Worker riêng `giapha-backup` (thư mục `backup-worker/`) chạy **mỗi đêm lúc 02:00 giờ Việt Nam**, đọc `members`, `events`, `activities` từ Firestore và ghi một file JSON vào bucket R2 `giapha-backups`:
+
+| Thư mục | Nội dung | Giữ |
+|---|---|---|
+| `daily/YYYY-MM-DD.json` | Bản mỗi đêm | 60 ngày gần nhất |
+| `monthly/YYYY-MM.json` | Bản đầu tiên của mỗi tháng | Vĩnh viễn |
+
+Collection `users` (hồ sơ đăng nhập, vai trò) không được sao lưu vì không đọc công khai được. Nếu mất, người dùng đăng nhập lại và admin duyệt lại. Ảnh nằm trên R2 `giapha-photos`, vốn đã được Cloudflare lưu bền.
+
+**Deploy Worker** (một lần, hoặc khi sửa code trong `backup-worker/`):
+```bash
+npx wrangler deploy --config backup-worker/wrangler.toml
+```
+
+**Xem / tải bản sao lưu:** Cloudflare dashboard → R2 → `giapha-backups` → chọn file → Download. Hoặc:
+```bash
+npx wrangler r2 object get giapha-backups/daily/2026-10-15.json --remote --file backup.json
+```
+
+**Chạy sao lưu ngay** (không chờ 2h sáng): dashboard → Workers & Pages → `giapha-backup` → Settings → Trigger events → cron `0 19 * * *` → chạy thử.
+
+**Khôi phục** (cần `npx firebase-tools login` bằng tài khoản chủ project):
+```bash
+node scripts/restore-backup.mjs backup.json                              # xem trước, không ghi gì
+node scripts/restore-backup.mjs backup.json --apply                      # ghi lại members + events
+node scripts/restore-backup.mjs backup.json --only nguyen-huu-chi --apply # chỉ khôi phục 1 người
+```
+Script không bao giờ xóa bản ghi đang có, chỉ tạo lại bản ghi bị mất và ghi đè bản ghi trùng id bằng nội dung trong file.
+
 ## Cập nhật sau này
 Chỉ cần `git push` lên nhánh production, Cloudflare Pages tự build và deploy. Rules Firestore thay đổi thì chạy lại bước 6.
