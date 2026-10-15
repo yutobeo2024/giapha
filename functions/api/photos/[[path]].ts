@@ -3,6 +3,7 @@ import type { Env } from "../../_lib/env";
 /**
  * GET /api/photos/<key>        ảnh thành viên
  * GET /api/photos/audio/<key>  nhạc nền trang Giới thiệu
+ * GET /api/photos/posts/<key>  ảnh bài viết trang Thông tin
  *
  * Key là duy nhất, không ghi đè nên cache 1 năm. Hỗ trợ header Range (trả 206)
  * để trình duyệt phát, tua và lặp nhạc chuẩn, nhất là Safari trên iPhone/iPad.
@@ -10,7 +11,7 @@ import type { Env } from "../../_lib/env";
 export const onRequestGet: PagesFunction<Env> = async ({ params, env, request }) => {
   const parts = Array.isArray(params.path) ? params.path : [String(params.path || "")];
   const key = parts.join("/");
-  if (!/^(audio\/)?[A-Za-z0-9._-]+$/.test(key)) return new Response("Bad key", { status: 400 });
+  if (!/^((audio|posts)\/)?[A-Za-z0-9._-]+$/.test(key)) return new Response("Bad key", { status: 400 });
 
   const rangeHeader = request.headers.get("Range");
 

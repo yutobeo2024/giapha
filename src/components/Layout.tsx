@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Clock,
   Sparkles,
+  Newspaper,
 } from "lucide-react";
 import { useAuthContext } from "../hooks/AuthContext";
 import { avatarUrl } from "../lib/avatar";
@@ -40,10 +41,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: "Danh sách", path: "/members", icon: Users },
     { name: "Cây gia phả", path: "/tree", icon: Network },
     { name: "Sự kiện", path: "/events", icon: Calendar },
+    { name: "Thông tin", path: "/thong-tin", icon: Newspaper },
     { name: "Quản trị", path: "/admin", icon: Settings, editorOnly: true },
   ];
 
   const filteredNavItems = navItems.filter((item) => !item.editorOnly || isEditor);
+  // Trang con (VD /thong-tin/<bài>) vẫn sáng mục cha trên menu
+  const isActive = (path: string) => (path === "/" ? location.pathname === "/" : location.pathname === path || location.pathname.startsWith(path + "/"));
   const userAvatar = user?.photoURL || avatarUrl(user?.displayName || user?.email || "?");
   const isPending = !!user && role === "user";
   // Trang 3D chiếm trọn màn hình: menu nền tối trong suốt, không khung nội dung, không footer
@@ -71,13 +75,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </div>
 
             {/* Desktop Navigation */}
-            <div className="hidden md:flex items-center gap-8">
+            <div className="hidden lg:flex items-center gap-5 xl:gap-7">
               {filteredNavItems.map((item) => (
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`flex items-center gap-2 text-sm font-medium transition-colors ${
-                    location.pathname === item.path
+                  className={`flex items-center gap-2 text-sm font-medium whitespace-nowrap transition-colors ${
+                    isActive(item.path)
                       ? immersive
                         ? "text-[#f6c35b]"
                         : "text-[#8B2323]"
@@ -86,7 +90,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                         : "text-[#6B665F] hover:text-[#2D2A26]"
                   }`}
                 >
-                  <item.icon className="w-4 h-4" />
+                  <item.icon className="w-4 h-4 hidden xl:block" />
                   {item.name}
                 </Link>
               ))}
@@ -118,7 +122,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </div>
 
             {/* Mobile Menu Button */}
-            <div className="md:hidden flex items-center">
+            <div className="lg:hidden flex items-center">
               <button onClick={() => setIsMenuOpen(!isMenuOpen)} className={immersive ? "text-[#f5ead6]" : "text-[#2D2A26]"} aria-label="Menu">
                 {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
               </button>
@@ -170,7 +174,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     to={item.path}
                     onClick={() => setIsMenuOpen(false)}
                     className={`flex items-center justify-between p-3 rounded-xl transition-colors ${
-                      location.pathname === item.path ? "bg-[#FDFCF9] text-[#8B2323]" : "text-[#6B665F] hover:bg-gray-50"
+                      isActive(item.path) ? "bg-[#FDFCF9] text-[#8B2323]" : "text-[#6B665F] hover:bg-gray-50"
                     }`}
                   >
                     <div className="flex items-center gap-3">
