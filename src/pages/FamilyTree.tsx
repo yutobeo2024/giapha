@@ -25,6 +25,11 @@ const FamilyTree: React.FC = () => {
   const [searchParams] = useSearchParams();
   const highlightId = searchParams.get("highlight");
   const treeRef = React.useRef<HTMLDivElement>(null);
+  const modalRef = React.useRef<HTMLDivElement>(null);
+  // Bấm sang cha/con/anh em trong khung chi tiết: cuộn khung về đầu để thấy tên người mới
+  useEffect(() => {
+    modalRef.current?.scrollTo({ top: 0 });
+  }, [selectedMember?.id]);
 
   useEffect(() => {
     const q = query(collection(db, "members"), orderBy("generation", "asc"), orderBy("name", "asc"));
@@ -148,7 +153,6 @@ const FamilyTree: React.FC = () => {
     return (
       <div className="flex flex-col items-center">
         <motion.div
-          layoutId={member.id}
           data-member-id={member.id}
           onClick={() => setSelectedMember(member)}
           whileHover={{ y: -2, scale: 1.02 }}
@@ -419,19 +423,24 @@ const FamilyTree: React.FC = () => {
               onClick={() => setSelectedMember(null)}
               className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60]"
             />
+            {/* Không dùng layoutId chung với ô trên cây: ô nằm trong vùng phóng/thu nên khung bị đặt sai chỗ */}
             <motion.div
-              layoutId={selectedMember.id}
-              className="fixed inset-x-4 bottom-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] bg-white rounded-3xl shadow-2xl z-[70] overflow-hidden"
+              ref={modalRef}
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="fixed inset-x-4 bottom-4 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] bg-white rounded-3xl shadow-2xl z-[70]"
             >
               <div className="relative h-32 bg-[#8B2323]">
                 <button
                   onClick={() => setSelectedMember(null)}
+                  aria-label="Đóng"
                   className="absolute top-4 right-4 p-2 bg-black/20 text-white rounded-full hover:bg-black/40 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="px-8 pb-8 -mt-16">
+              <div className="relative px-8 pb-8 -mt-16">
                 <div className="flex flex-col items-center text-center">
                   <img
                     src={selectedMember.photoUrl || avatarUrl(selectedMember.name, { gender: selectedMember.gender, size: 256 })}
