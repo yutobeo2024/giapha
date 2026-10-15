@@ -1,6 +1,4 @@
-import React, { useState, useEffect } from "react";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
-import { db, handleFirestoreError, OperationType } from "../firebase";
+import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Users, Search, Filter, ChevronRight, User as UserIcon, Info, X, ZoomIn, ZoomOut, Maximize, MousePointer2, FileDown } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
@@ -9,15 +7,20 @@ import { useSearchParams } from "react-router-dom";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import type { FamilyMember } from "../types";
 import { avatarUrl } from "../lib/avatar";
+import { useMembers } from "../hooks/useMembers";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Sơ đồ cây mặc định mở các nhánh đến hết đời này; đời sâu hơn bấm để mở */
+const OPEN_TO_GEN = 10;
+/** Chế độ danh sách: số người hiện trước ở mỗi đời */
+const GRID_PAGE = 24;
+
 const FamilyTree: React.FC = () => {
-  const [members, setMembers] = useState<FamilyMember[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { members, loading, error } = useMembers();
+  const [gridLimit, setGridLimit] = useState<Record<number, number>>({});
   const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
@@ -32,28 +35,69 @@ const FamilyTree: React.FC = () => {
   }, [selectedMember?.id]);
 
   useEffect(() => {
-    const q = query(collection(db, "members"), orderBy("generation", "asc"), orderBy("name", "asc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FamilyMember));
-      setMembers(data);
-      
-      if (highlightId && data.length > 0) {
-        const highlighted = data.find(m => m.id === highlightId);
-        if (highlighted) {
-          setSelectedMember(highlighted);
-        }
+    if (!highlightId || members.length === 0) return;
+    const highlighted = members.find(m => m.id === highlightId);
+    if (highlighted) {
+      setSelectedMember(highlighted);
+      revealMember(highlighted.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightId, members]);
+
+  // Con của từng người, tính một lần (cây có hơn 1.500 người)
+  const childrenOf = useMemo(() => {
+    const map = new Map<string, FamilyMember[]>();
+    for (const m of members) {
+      for (const p of [m.fatherId, m.motherId]) {
+        if (!p) continue;
+        if (!map.has(p)) map.set(p, []);
+        map.get(p)!.push(m);
       }
-      
-      setLoading(false);
-    }, (err) => {
-      setError(handleFirestoreError(err, OperationType.LIST, "members"));
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, [highlightId]);
+    }
+    return map;
+  }, [members]);
+  const byId = useMemo(() => new Map(members.map(m => [m.id, m])), [members]);
 
   // Gốc cây: thành viên không có cha lẫn mẹ (bất kể đời), để nhánh chưa nối vẫn hiển thị.
   const roots = members.filter(m => !m.fatherId && !m.motherId);
+
+  // Nhánh đang mở: mặc định mở đến đời OPEN_TO_GEN; bấm vào nút dưới mỗi người để mở/đóng nhánh con.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const isOpen = (m: FamilyMember) => (expanded.has(m.id) || m.generation < OPEN_TO_GEN) && !collapsed.has(m.id);
+  const toggleOpen = (m: FamilyMember) => {
+    const open = isOpen(m);
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (open) next.delete(m.id);
+      else next.add(m.id);
+      return next;
+    });
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (open) next.add(m.id);
+      else next.delete(m.id);
+      return next;
+    });
+  };
+  /** Mở mọi nhánh tổ tiên của một người để người đó hiện trên sơ đồ */
+  const revealMember = (id: string) => {
+    const chain: string[] = [];
+    let cur = byId.get(id);
+    while (cur) {
+      const parentId = cur.fatherId || cur.motherId;
+      if (!parentId) break;
+      chain.push(parentId);
+      cur = byId.get(parentId);
+    }
+    if (!chain.length) return;
+    setExpanded(prev => new Set([...prev, ...chain]));
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      chain.forEach(c => next.delete(c));
+      return next;
+    });
+  };
 
   const filteredMembers = members.filter(m => {
     return m.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -145,8 +189,9 @@ const FamilyTree: React.FC = () => {
 
   // Recursive component for Tree View
   const MemberNode = ({ member, level = 0 }: { member: FamilyMember; level: number }) => {
-    const children = members.filter(m => m.fatherId === member.id || m.motherId === member.id);
+    const children = childrenOf.get(member.id) || [];
     const hasChildren = children.length > 0;
+    const open = hasChildren && isOpen(member);
     const isHighlighted = member.id === highlightId;
     const isSearchMatch = searchTerm && member.name.toLowerCase().includes(searchTerm.toLowerCase());
 
@@ -168,6 +213,7 @@ const FamilyTree: React.FC = () => {
               <img
                 src={member.photoUrl || avatarUrl(member.name, { gender: member.gender })}
                 alt={member.name}
+                loading="lazy"
                 className="w-10 h-10 rounded-full object-cover border border-white shadow-sm"
               />
               {member.status === "Deceased" && (
@@ -184,6 +230,18 @@ const FamilyTree: React.FC = () => {
         </motion.div>
 
         {hasChildren && (
+          <button
+            type="button"
+            onClick={() => toggleOpen(member)}
+            data-toggle-branch={member.id}
+            className="relative z-10 mt-1.5 px-2 py-0.5 rounded-full border border-[#E5E1D8] bg-white text-[10px] font-bold text-[#8B2323] hover:bg-[#8B2323]/5"
+            aria-expanded={open}
+          >
+            {open ? "Thu gọn" : `+ ${children.length} con`}
+          </button>
+        )}
+
+        {open && (
           <div className="relative pt-6 flex flex-col items-center">
             {/* Vertical line from parent to horizontal line */}
             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1.5px] h-6 bg-[#D1CDC2]" />
@@ -271,17 +329,17 @@ const FamilyTree: React.FC = () => {
             />
             {searchTerm && filteredMembers.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-[#E5E1D8] rounded-2xl shadow-xl z-[100] max-h-64 overflow-y-auto p-2">
-                {filteredMembers.map(m => (
+                {filteredMembers.slice(0, 40).map(m => (
                   <button
                     key={m.id}
                     onClick={() => {
                       setSelectedMember(m);
                       setSearchTerm("");
-                      // Scroll to member in tree
-                      const element = document.querySelector(`[data-member-id="${m.id}"]`);
-                      if (element) {
-                        element.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-                      }
+                      // Mở nhánh chứa người này rồi cuộn tới
+                      revealMember(m.id);
+                      setTimeout(() => {
+                        document.querySelector(`[data-member-id="${m.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+                      }, 300);
                     }}
                     className="w-full flex items-center gap-3 p-2 hover:bg-gray-50 rounded-xl transition-colors text-left"
                   >
@@ -382,7 +440,7 @@ const FamilyTree: React.FC = () => {
                   <h3 className="font-serif text-xl font-bold text-[#8B2323]">Thế hệ thứ {gen}</h3>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                  {filteredMembers.filter(m => m.generation === gen).map((member) => (
+                  {filteredMembers.filter(m => m.generation === gen).slice(0, gridLimit[gen] ?? GRID_PAGE).map((member) => (
                     <motion.div
                       key={member.id}
                       onClick={() => setSelectedMember(member)}
@@ -396,6 +454,7 @@ const FamilyTree: React.FC = () => {
                         <img
                           src={member.photoUrl || avatarUrl(member.name, { gender: member.gender })}
                           alt=""
+                          loading="lazy"
                           className="w-12 h-12 rounded-full object-cover border border-[#E5E1D8]"
                         />
                         <div>
@@ -406,6 +465,19 @@ const FamilyTree: React.FC = () => {
                     </motion.div>
                   ))}
                 </div>
+                {(() => {
+                  const total = filteredMembers.filter(m => m.generation === gen).length;
+                  const shown = Math.min(total, gridLimit[gen] ?? GRID_PAGE);
+                  return shown < total ? (
+                    <button
+                      type="button"
+                      onClick={() => setGridLimit(prev => ({ ...prev, [gen]: shown + GRID_PAGE * 4 }))}
+                      className="px-5 py-2 rounded-full border border-[#E5E1D8] bg-white text-sm font-bold text-[#8B2323] hover:bg-[#8B2323]/5"
+                    >
+                      Xem thêm ({total - shown} người)
+                    </button>
+                  ) : null;
+                })()}
               </div>
             ))}
           </div>
