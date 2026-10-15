@@ -46,18 +46,41 @@ export function fetchMembers(fresh = false): Promise<FamilyMember[]> {
   return inflight;
 }
 
-/** Biên tập viên vừa thêm/sửa/xóa thành viên: dựng lại bản chụp trên máy chủ rồi tải lại. */
-export async function refreshMembersSnapshot(user: User | null): Promise<void> {
+/** Biên tập viên vừa thêm/sửa/xóa một người: sửa ngay danh sách đang giữ trong phiên, không chờ máy chủ. */
+export function patchMembersCache(id: string, member: FamilyMember | null): void {
+  if (!cache) return;
+  const rest = cache.filter((m) => m.id !== id);
+  cache = (member ? [...rest, member] : rest).sort(byGenThenName);
+  listeners.forEach((fn) => fn(cache!));
+}
+
+/**
+ * Đẩy thay đổi lên bản chụp công khai trên máy chủ rồi tải lại.
+ * Có `id`: máy chủ chỉ đọc lại đúng thành viên đó (1 lượt đọc Firestore); không có: dựng lại toàn bộ.
+ * Trả về false nếu máy chủ không cập nhật được (danh sách trong phiên vẫn giữ bản đã sửa tại chỗ).
+ */
+export async function refreshMembersSnapshot(user: User | null, id?: string): Promise<boolean> {
+  // `npm run dev` không có Pages Functions: danh sách đọc thẳng Firestore nên không có gì để làm mới
+  if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) return true;
+  if (!user) return false;
   try {
-    if (user) {
-      const token = await user.getIdToken();
-      await fetch("/api/members/refresh", { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    const token = await user.getIdToken();
+    const res = await fetch("/api/members/refresh", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, ...(id ? { "Content-Type": "application/json" } : {}) },
+      body: id ? JSON.stringify({ id }) : undefined,
+    });
+    if (!res.ok) {
+      console.warn("Không làm mới được bản chụp thành viên:", res.status, await res.text().catch(() => ""));
+      return false;
     }
   } catch (e) {
     console.warn("Không làm mới được bản chụp thành viên:", e);
+    return false;
   }
-  cache = null;
-  await fetchMembers(true).catch(() => undefined);
+  // Sửa một người: danh sách trong phiên đã sửa tại chỗ (patchMembersCache), không cần tải lại cả danh sách
+  if (!id) await fetchMembers(true).catch(() => undefined);
+  return true;
 }
 
 export function useMembers() {
