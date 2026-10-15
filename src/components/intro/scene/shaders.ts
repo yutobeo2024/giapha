@@ -1,18 +1,23 @@
 import * as THREE from "three";
+import { WIND_GLSL, windUniforms } from "./wind";
 
-/** Đốm sáng dạng viên ngọc: lõi sáng ở giữa, viền dịu dần (đọc được là khối cầu, không phải đĩa phẳng). */
+/** Đốm sáng dạng viên ngọc: lõi sáng ở giữa, viền dịu dần (đọc được là khối cầu, không phải đĩa phẳng). Đung đưa theo gió. */
 export function makeOrbMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     toneMapped: false,
+    uniforms: windUniforms,
     vertexShader: `
       varying vec3 vColor; varying vec3 vNormal; varying vec3 vView;
+      ${WIND_GLSL}
       void main() {
         #ifdef USE_INSTANCING_COLOR
           vColor = instanceColor;
         #else
           vColor = vec3(1.0);
         #endif
-        vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+        vec4 wp = instanceMatrix * vec4(position, 1.0);
+        wp.xyz += windOffset(instanceMatrix[3].xyz, 0.0);
+        vec4 mv = modelViewMatrix * wp;
         vNormal = normalize(normalMatrix * mat3(instanceMatrix) * normal);
         vView = normalize(-mv.xyz);
         gl_Position = projectionMatrix * mv;
@@ -40,8 +45,10 @@ export function makeLeafMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     toneMapped: false,
     side: THREE.DoubleSide,
+    uniforms: windUniforms,
     vertexShader: `
       varying vec3 vColor; varying vec2 vUv; varying vec3 vNormal; varying vec3 vView;
+      ${WIND_GLSL}
       void main() {
         #ifdef USE_INSTANCING_COLOR
           vColor = instanceColor;
@@ -49,7 +56,9 @@ export function makeLeafMaterial(): THREE.ShaderMaterial {
           vColor = vec3(1.0);
         #endif
         vUv = uv;
-        vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+        vec4 wp = instanceMatrix * vec4(position, 1.0);
+        wp.xyz += windOffset(instanceMatrix[3].xyz, 0.12);
+        vec4 mv = modelViewMatrix * wp;
         vNormal = normalize(normalMatrix * mat3(instanceMatrix) * normal);
         vView = normalize(-mv.xyz);
         gl_Position = projectionMatrix * mv;
@@ -164,8 +173,10 @@ export function makeBarkMaterial(
     shader.uniforms.uTime = uniforms.time;
     shader.uniforms.uVisibleGen = uniforms.visibleGen;
     shader.uniforms.uHeight = { value: tex.height };
+    Object.assign(shader.uniforms, windUniforms);
     shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nattribute float aGen; varying float vGen; varying vec3 vWPos;")
+      .replace("#include <common>", `#include <common>\nattribute float aGen; varying float vGen; varying vec3 vWPos;\n${WIND_GLSL}`)
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\n transformed += windOffset(position, 0.0);")
       .replace(
         "#include <worldpos_vertex>",
         `#include <worldpos_vertex>
@@ -188,6 +199,7 @@ export function makeBarkMaterial(
         totalEmissiveRadiance += vec3(1.0, 0.62, 0.22) * furrow * (0.1 + pulse * 1.0);`
       );
   };
+  mat.customProgramCacheKey = () => "bark-wind";
   return mat;
 }
 

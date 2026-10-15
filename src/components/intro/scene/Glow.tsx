@@ -1,10 +1,11 @@
-import React, { useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { TreeLayout } from "../../../lib/treeLayout3d";
 import { isAlive } from "../../../types";
 import { glowTexture } from "./textures";
 import type { Quality } from "./constants";
+import { withWind } from "./wind";
 
 /** Quầng sáng mềm quanh mỗi đốm (vàng cho tiền nhân, xanh ngọc cho người sống) + lớp "lá sáng" lấp lánh trên tán */
 export default function Glow({
@@ -80,7 +81,22 @@ export default function Glow({
     }
   });
 
-  const common = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, sizeAttenuation: true } as const;
+  // Vật liệu điểm sáng có gió (cùng trường dịch chuyển với cành và đèn lá để quầng sáng bám theo)
+  const mats = useMemo(() => {
+    const common = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, sizeAttenuation: true, opacity: 0 };
+    return {
+      normal: withWind(new THREE.PointsMaterial({ ...common, map: warm, size: 2.6, color: "#ffb84d" })),
+      alive: withWind(new THREE.PointsMaterial({ ...common, map: cool, size: 3.4, color: "#8af5c4" }), 0.12),
+      hi: withWind(new THREE.PointsMaterial({ ...common, map: warm, size: 6, color: "#ffe2a0" })),
+      leaf: withWind(new THREE.PointsMaterial({ ...common, map: warm, size: 0.1, vertexColors: true }), 0.08),
+    };
+  }, [warm, cool]);
+  useEffect(() => () => Object.values(mats).forEach((m) => m.dispose()), [mats]);
+  normalRef.current = mats.normal;
+  aliveRef.current = mats.alive;
+  hiRef.current = mats.hi;
+  leafRef.current = mats.leaf;
+
   return (
     <>
       {heart && (
@@ -92,14 +108,14 @@ export default function Glow({
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[normal, 3]} />
         </bufferGeometry>
-        <pointsMaterial ref={normalRef} {...common} map={warm} size={2.6} color="#ffb84d" opacity={0} />
+        <primitive object={mats.normal} attach="material" />
       </points>
       {alive.length > 0 && (
         <points key={`a${alive.length}`}>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[alive, 3]} />
           </bufferGeometry>
-          <pointsMaterial ref={aliveRef} {...common} map={cool} size={3.4} color="#8af5c4" opacity={0} />
+          <primitive object={mats.alive} attach="material" />
         </points>
       )}
       {hi.length > 0 && (
@@ -107,7 +123,7 @@ export default function Glow({
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[hi, 3]} />
           </bufferGeometry>
-          <pointsMaterial ref={hiRef} {...common} map={warm} size={6} color="#ffe2a0" opacity={0} />
+          <primitive object={mats.hi} attach="material" />
         </points>
       )}
       <points key={`l${leaves.pos.length}`}>
@@ -115,7 +131,7 @@ export default function Glow({
           <bufferAttribute attach="attributes-position" args={[leaves.pos, 3]} />
           <bufferAttribute attach="attributes-color" args={[leaves.col, 3]} />
         </bufferGeometry>
-        <pointsMaterial ref={leafRef} {...common} map={warm} size={0.1} vertexColors opacity={0} />
+        <primitive object={mats.leaf} attach="material" />
       </points>
     </>
   );

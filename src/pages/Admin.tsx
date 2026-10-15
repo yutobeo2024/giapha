@@ -41,6 +41,7 @@ import {
 import { format } from "date-fns";
 import { useSearchParams } from "react-router-dom";
 import { useAuthContext } from "../hooks/AuthContext";
+import { refreshMembersSnapshot } from "../hooks/useMembers";
 import PostsManager from "../components/admin/PostsManager";
 import { uploadPhoto, uploadMedia } from "../lib/image";
 import { avatarUrl } from "../lib/avatar";
@@ -226,6 +227,7 @@ const Admin: React.FC = () => {
       }
       setMessage({ type: "success", text: "Lưu thành công!" });
       closeModal();
+      if (col === "members") void refreshMembersSnapshot(user);
     } catch (err) {
       setMessage({
         type: "error",
@@ -245,6 +247,7 @@ const Admin: React.FC = () => {
       await logActivity(`đã xóa ${activeTab === "members" ? "thành viên" : "sự kiện"}: ${name}`);
       setMessage({ type: "success", text: "Xóa thành công!" });
       setItemToDelete(null);
+      if (activeTab === "members") void refreshMembersSnapshot(user);
     } catch (err) {
       setMessage({ type: "error", text: handleFirestoreError(err, OperationType.DELETE, activeTab) });
     } finally {
@@ -310,6 +313,7 @@ const Admin: React.FC = () => {
       await batch.commit();
       await logActivity(`đã nạp dữ liệu gốc (${SEED_MEMBERS.length} thành viên, 12 đời)`);
       setMessage({ type: "success", text: `Đã nạp ${SEED_MEMBERS.length} thành viên.` });
+      void refreshMembersSnapshot(user);
     } catch (err) {
       setMessage({ type: "error", text: handleFirestoreError(err, OperationType.WRITE, "members") });
     } finally {
@@ -375,7 +379,8 @@ const Admin: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {activeTab === "members" && isAdmin && (
+          {/* Chỉ dùng khi dựng site lần đầu: dữ liệu gốc cũ (đời 1-12) khác bản đã sửa theo kỷ yếu */}
+          {activeTab === "members" && isAdmin && members.length === 0 && (
             <button
               onClick={() => setShowSeedConfirm(true)}
               disabled={loading}

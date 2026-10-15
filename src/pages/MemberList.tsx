@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
-import { db, handleFirestoreError, OperationType } from "../firebase";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Search, 
@@ -18,65 +16,48 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { STATUS_LABEL, type FamilyMember as Member } from "../types";
 import { avatarUrl } from "../lib/avatar";
+import { useMembers } from "../hooks/useMembers";
+
+/** Số thẻ hiện mỗi lần (danh sách có hơn 1.500 người) */
+const PAGE = 60;
 
 const MemberList: React.FC = () => {
-  const [members, setMembers] = useState<Member[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { members, loading, error } = useMembers();
   const [searchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState(searchParams.get("q") || "");
   const [selectedGeneration, setSelectedGeneration] = useState<number | "all">("all");
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [limit, setLimit] = useState(PAGE);
   const navigate = useNavigate();
 
-  const getDescendantStats = (memberId: string) => {
-    const children = members.filter(m => m.fatherId === memberId || m.motherId === memberId);
-    const grandchildren = members.filter(m => {
-      const parent = members.find(p => p.id === m.fatherId || p.id === m.motherId);
-      return parent && (parent.fatherId === memberId || parent.motherId === memberId);
-    });
-    const greatGrandchildren = members.filter(m => {
-      const parent = members.find(p => p.id === m.fatherId || p.id === m.motherId);
-      if (!parent) return false;
-      const grandparent = members.find(gp => gp.id === parent.fatherId || gp.id === parent.motherId);
-      return grandparent && (grandparent.fatherId === memberId || grandparent.motherId === memberId);
-    });
-
-    return {
-      children: {
-        total: children.length,
-        sons: children.filter(c => c.gender === "Nam").length,
-        daughters: children.filter(c => c.gender === "Nữ").length
-      },
-      grandchildren: {
-        total: grandchildren.length,
-        sons: grandchildren.filter(c => c.gender === "Nam").length,
-        daughters: grandchildren.filter(c => c.gender === "Nữ").length
-      },
-      greatGrandchildren: {
-        total: greatGrandchildren.length,
-        sons: greatGrandchildren.filter(c => c.gender === "Nam").length,
-        daughters: greatGrandchildren.filter(c => c.gender === "Nữ").length
-      }
-    };
-  };
-
   useEffect(() => {
-    const q = query(collection(db, "members"), orderBy("generation", "asc"), orderBy("name", "asc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const membersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Member));
-      setMembers(membersData);
-      if (membersData.length > 0 && !selectedMember) {
-        setSelectedMember(membersData[0]);
-      }
-      setLoading(false);
-    }, (err) => {
-      setError(handleFirestoreError(err, OperationType.LIST, "members"));
-      setLoading(false);
-    });
+    if (members.length > 0 && !selectedMember) setSelectedMember(members[0]);
+  }, [members, selectedMember]);
+  useEffect(() => setLimit(PAGE), [searchTerm, selectedGeneration]);
 
-    return () => unsubscribe();
-  }, []);
+  const childrenOf = useMemo(() => {
+    const map = new Map<string, Member[]>();
+    for (const m of members) {
+      for (const p of [m.fatherId, m.motherId]) {
+        if (!p) continue;
+        if (!map.has(p)) map.set(p, []);
+        map.get(p)!.push(m);
+      }
+    }
+    return map;
+  }, [members]);
+
+  const getDescendantStats = (memberId: string) => {
+    const children = childrenOf.get(memberId) || [];
+    const grandchildren = children.flatMap(c => childrenOf.get(c.id) || []);
+    const greatGrandchildren = grandchildren.flatMap(c => childrenOf.get(c.id) || []);
+    const count = (list: Member[]) => ({
+      total: list.length,
+      sons: list.filter(c => c.gender === "Nam").length,
+      daughters: list.filter(c => c.gender === "Nữ").length,
+    });
+    return { children: count(children), grandchildren: count(grandchildren), greatGrandchildren: count(greatGrandchildren) };
+  };
 
   const generations = useMemo(() => {
     const gens = Array.from(new Set(members.map(m => m.generation))).sort((a, b) => a - b);
@@ -163,7 +144,7 @@ const MemberList: React.FC = () => {
         <div className="lg:col-span-7 space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <AnimatePresence mode="popLayout">
-              {filteredMembers.map((member) => (
+              {filteredMembers.slice(0, limit).map((member) => (
                 <motion.div
                   layout
                   key={member.id}
@@ -179,6 +160,7 @@ const MemberList: React.FC = () => {
                       <img 
                         src={member.photoUrl || avatarUrl(member.name)}
                         alt={member.name} 
+                        loading="lazy"
                         className="w-16 h-16 rounded-2xl object-cover border border-[#E5E1D8]"
                       />
                       <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center ${member.gender === "Nam" ? "bg-blue-500" : "bg-pink-500"}`}>
@@ -213,7 +195,19 @@ const MemberList: React.FC = () => {
               ))}
             </AnimatePresence>
           </div>
-          
+
+          {filteredMembers.length > limit && (
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => setLimit(l => l + PAGE)}
+                className="px-6 py-3 rounded-full border border-[#E5E1D8] bg-white text-sm font-bold text-[#8B2323] hover:bg-[#8B2323]/5"
+              >
+                Xem thêm ({filteredMembers.length - limit} người)
+              </button>
+            </div>
+          )}
+
           {filteredMembers.length === 0 && (
             <div className="py-20 text-center bg-white rounded-[40px] border border-dashed border-[#E5E1D8]">
               <Users className="w-16 h-16 text-[#A19D96] opacity-20 mx-auto mb-4" />

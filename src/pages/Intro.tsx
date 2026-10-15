@@ -1,9 +1,10 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { ChevronDown, ChevronUp, Maximize2, Minimize2, Music2, VolumeX, X, Network, Users, ArrowRight, Orbit, Compass, ArrowUpFromLine } from "lucide-react";
-import { db, handleFirestoreError, OperationType } from "../firebase";
+import { db } from "../firebase";
+import { fetchMembers } from "../hooks/useMembers";
 import type { FamilyMember } from "../types";
 import { STATUS_LABEL, isAlive } from "../types";
 import { computeTreeLayout } from "../lib/treeLayout3d";
@@ -105,14 +106,16 @@ const Intro: React.FC = () => {
 
   // ---------- data
   useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, "members"), orderBy("generation", "asc"), orderBy("name", "asc")),
-      (snap) => {
-        setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as FamilyMember));
+    let alive = true;
+    fetchMembers().then(
+      (m) => {
+        if (!alive) return;
+        setMembers(m);
         setLoading(false);
       },
-      (err) => {
-        setError(handleFirestoreError(err, OperationType.LIST, "members"));
+      () => {
+        if (!alive) return;
+        setError("Không tải được danh sách thành viên. Vui lòng thử lại sau.");
         setLoading(false);
       }
     );
@@ -122,7 +125,7 @@ const Intro: React.FC = () => {
       () => setMusicUrl(null)
     );
     return () => {
-      unsub();
+      alive = false;
       unsubSettings();
     };
   }, []);

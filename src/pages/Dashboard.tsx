@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { collection, query, orderBy, limit, where, onSnapshot, getDocs } from "firebase/firestore";
+import { collection, query, orderBy, limit, where, onSnapshot } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { motion } from "framer-motion";
 import {
@@ -20,6 +20,7 @@ import { vi } from "date-fns/locale";
 import { Link, useNavigate } from "react-router-dom";
 import type { ActivityLog, FamilyEvent, FamilyMember } from "../types";
 import { avatarUrl } from "../lib/avatar";
+import { fetchMembers } from "../hooks/useMembers";
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -38,8 +39,7 @@ const Dashboard: React.FC = () => {
     // Thống kê + Thủy tổ (đời 1, không có cha mẹ)
     const fetchStats = async () => {
       try {
-        const membersSnap = await getDocs(collection(db, "members"));
-        const members = membersSnap.docs.map(d => ({ id: d.id, ...d.data() } as FamilyMember));
+        const members = await fetchMembers();
         const generations = new Set(members.map(m => m.generation));
         setStats({
           totalMembers: members.length,

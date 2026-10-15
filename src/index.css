@@ -137,6 +137,15 @@
 }
 .intro-dot-alive { background: #7ff0b8; box-shadow: 0 0 8px rgba(127, 240, 184, 0.9); border-radius: 60% 0 60% 0; }
 .intro-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; padding-bottom: 2px; }
+.intro-chips-wrap { position: relative; min-width: 0; }
+.intro-chips-arrow {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; width: 30px; height: 30px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center; color: #f6c35b;
+  background: rgba(14, 10, 18, 0.92); border: 1px solid rgba(246, 195, 91, 0.45); box-shadow: 0 0 14px 6px rgba(14, 10, 18, 0.85);
+}
+.intro-chips-arrow:hover { color: #fff; border-color: rgba(246, 195, 91, 0.8); }
+.intro-chips-arrow-left { left: -2px; }
+.intro-chips-arrow-right { right: -2px; }
 .intro-chips::-webkit-scrollbar { display: none; }
 .intro-chip {
   flex-shrink: 0; padding: 6px 11px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;

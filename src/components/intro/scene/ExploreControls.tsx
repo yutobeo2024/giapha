@@ -149,7 +149,7 @@ export default function ExploreControls({ layout, handoff, fly, reduced, onNearb
       panSpeed={0.7}
       minDistance={2.5}
       maxDistance={75}
-      maxPolarAngle={Math.PI * 0.52}
+      maxPolarAngle={Math.PI * 0.82}
       autoRotateSpeed={0.35}
       screenSpacePanning
       onStart={() => {

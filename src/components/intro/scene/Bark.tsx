@@ -54,18 +54,20 @@ function chainTube(chain: LayoutChain, quality: Quality): THREE.BufferGeometry {
   const around = Math.max(1, Math.round((2 * Math.PI * avgR) / TEX_LEN));
   const along = length / TEX_LEN;
   const uOff = (chain.id.length * 0.37) % 1;
-  const gnarl = chain.kind === "trunk" ? 0.07 : 0;
+  // Gờ vỏ dọc thân và rễ bạnh, xoắn rất chậm theo chiều dài (vỏ sồi già) chứ không vặn xoáy
+  const gnarl = chain.kind === "trunk" || chain.kind === "root" ? 0.06 : 0;
   for (let i = 0; i <= tubular; i++) {
     const t = i / tubular;
     const center = curve.getPointAt(t);
     const r = sample(fr, chain.radii, t);
     const g = sample(fr, chain.gens, t);
+    const twist = t * length * 0.1;
     for (let j = 0; j <= radial; j++) {
       const idx = i * (radial + 1) + j;
       let rr = r;
-      if (gnarl && r > 0.45) {
+      if (gnarl && r > 0.4) {
         const ang = (j / radial) * Math.PI * 2;
-        rr *= 1 + gnarl * (0.55 * Math.sin(5 * ang + i * 0.21) + 0.45 * Math.sin(9 * ang - i * 0.33 + 1.3));
+        rr *= 1 + gnarl * (0.55 * Math.sin(5 * ang + twist) + 0.45 * Math.sin(9 * ang - twist * 1.4 + 1.3));
       }
       v.fromBufferAttribute(pos, idx).sub(center).multiplyScalar(rr).add(center);
       pos.setXYZ(idx, v.x, v.y, v.z);
