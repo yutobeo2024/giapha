@@ -35,16 +35,19 @@ import {
   Music2,
   Upload,
   Sparkles,
+  Newspaper,
   type LucideIcon,
 } from "lucide-react";
 import { format } from "date-fns";
+import { useSearchParams } from "react-router-dom";
 import { useAuthContext } from "../hooks/AuthContext";
+import PostsManager from "../components/admin/PostsManager";
 import { uploadPhoto, uploadMedia } from "../lib/image";
 import { avatarUrl } from "../lib/avatar";
 import { SEED_MEMBERS } from "../data/seedMembers";
 import { ROLE_LABEL, STATUS_LABEL, type FamilyMember, type FamilyEvent, type UserDoc, type UserRole } from "../types";
 
-type Tab = "members" | "events" | "users" | "settings";
+type Tab = "members" | "events" | "users" | "posts" | "settings";
 type FormState = Partial<Omit<FamilyMember, "id">> & Partial<Omit<FamilyEvent, "id">>;
 type Message = { type: "success" | "error"; text: string };
 
@@ -55,7 +58,9 @@ const labelCls = "block text-xs font-bold uppercase text-[#A19D96] mb-2";
 const Admin: React.FC = () => {
   const { user, isEditor, isAdmin, isSuperAdmin, loading: authLoading, login } = useAuthContext();
 
-  const [activeTab, setActiveTab] = useState<Tab>("members");
+  const [searchParams] = useSearchParams();
+  // /admin?tab=posts&edit=<id>: mở thẳng tab Bài viết (từ trang Thông tin)
+  const [activeTab, setActiveTab] = useState<Tab>(() => (searchParams.get("tab") === "posts" ? "posts" : "members"));
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [events, setEvents] = useState<FamilyEvent[]>([]);
   const [users, setUsers] = useState<UserDoc[]>([]);
@@ -105,7 +110,7 @@ const Admin: React.FC = () => {
 
   // Editor không có tab users/settings: nếu đang ở tab đó thì quay về members
   useEffect(() => {
-    if ((activeTab === "users" || activeTab === "settings") && !isAdmin) setActiveTab("members");
+    if ((activeTab === "users" || activeTab === "posts" || activeTab === "settings") && !isAdmin) setActiveTab("members");
   }, [activeTab, isAdmin]);
 
   // Cài đặt site (nhạc nền trang Giới thiệu 3D)
@@ -317,6 +322,7 @@ const Admin: React.FC = () => {
     { key: "members", label: "Thành viên", icon: Users, count: members.length },
     { key: "events", label: "Sự kiện", icon: Calendar, count: events.length },
     { key: "users", label: "Người dùng", icon: Shield, count: users.length, adminOnly: true },
+    { key: "posts", label: "Bài viết", icon: Newspaper, adminOnly: true },
     { key: "settings", label: "Cài đặt", icon: Settings, adminOnly: true },
   ];
 
@@ -461,6 +467,10 @@ const Admin: React.FC = () => {
       )}
 
       {/* Cài đặt */}
+      {activeTab === "posts" && isAdmin && (
+        <PostsManager user={user} initialEditId={searchParams.get("edit")} setMessage={setMessage} logActivity={logActivity} />
+      )}
+
       {activeTab === "settings" && (
         <div className="bg-white rounded-3xl border border-[#E5E1D8] shadow-sm p-6 sm:p-8 space-y-6">
           <div className="flex items-start gap-4">
@@ -526,7 +536,7 @@ const Admin: React.FC = () => {
       )}
 
       {/* Table */}
-      {activeTab !== "settings" && (
+      {activeTab !== "settings" && activeTab !== "posts" && (
       <div className="bg-white rounded-3xl border border-[#E5E1D8] overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left">

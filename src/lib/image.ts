@@ -8,12 +8,12 @@ const JPEG_QUALITY = 0.85;
  * Thu nhỏ ảnh ở trình duyệt về tối đa 800px cạnh dài, xuất JPEG.
  * Ảnh thành viên gia phả không cần độ phân giải cao; ~40-80KB mỗi ảnh.
  */
-export async function resizeImage(file: File): Promise<Blob> {
+export async function resizeImage(file: File, maxEdge = MAX_EDGE): Promise<Blob> {
   if (!file.type.startsWith("image/")) throw new Error("Tệp không phải hình ảnh.");
   if (file.size > MAX_SOURCE_BYTES) throw new Error("Ảnh quá lớn (tối đa 10MB).");
 
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
   const width = Math.round(bitmap.width * scale);
   const height = Math.round(bitmap.height * scale);
 
@@ -38,8 +38,8 @@ export async function resizeImage(file: File): Promise<Blob> {
  * Upload ảnh lên Cloudflare R2 qua Pages Function /api/photos.
  * Trả về đường dẫn tương đối "/api/photos/<key>" để lưu vào photoUrl.
  */
-export async function uploadPhoto(file: File, user: User): Promise<string> {
-  const blob = await resizeImage(file);
+export async function uploadPhoto(file: File, user: User, maxEdge = MAX_EDGE): Promise<string> {
+  const blob = await resizeImage(file, maxEdge);
   const token = await user.getIdToken();
 
   const form = new FormData();

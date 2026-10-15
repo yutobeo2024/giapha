@@ -9,6 +9,8 @@ import FamilyTree from "./pages/FamilyTree";
 import Events from "./pages/Events";
 import Admin from "./pages/Admin";
 import Biography from "./pages/Biography";
+import News from "./pages/News";
+import NewsDetail from "./pages/NewsDetail";
 
 // Trang 3D tải riêng: three.js không làm nặng các trang khác
 const Intro = lazy(() => import("./pages/Intro"));
@@ -26,6 +28,8 @@ export default function App() {
               <Route path="/events" element={<Events />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/biography" element={<Biography />} />
+              <Route path="/thong-tin" element={<News />} />
+              <Route path="/thong-tin/:id" element={<NewsDetail />} />
               <Route
                 path="/gioi-thieu"
                 element={

@@ -69,3 +69,35 @@ export const ROLE_LABEL: Record<UserRole, string> = {
   editor: "Biên tập",
   admin: "Quản trị",
 };
+
+/** Bài trên trang Thông tin: tự soạn (article) hoặc thẻ liên kết tới bài báo gốc (link). */
+export type PostKind = "article" | "link";
+
+export interface PostSource {
+  name: string;
+  url: string;
+}
+
+export interface Post {
+  /** document id, đồng thời là đường dẫn /thong-tin/<id> */
+  id: string;
+  kind: PostKind;
+  title: string;
+  summary?: string;
+  /** Nội dung dạng markdown rút gọn (xem src/lib/markdown.tsx) */
+  content?: string;
+  coverUrl?: string;
+  coverCaption?: string;
+  /** Nguồn tham khảo / bài gốc; với kind "link" phần tử đầu là bài được nhúng */
+  sources?: PostSource[];
+  /** Ngày sự kiện hoặc ngày đăng gốc, YYYY-MM-DD */
+  eventDate?: string;
+  published: boolean;
+  pinned?: boolean;
+  authorName?: string;
+  /** ISO date-time string */
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PostInput = Omit<Post, "id">;
