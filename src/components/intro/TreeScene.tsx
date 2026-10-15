@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { PerformanceMonitor } from "@react-three/drei";
 import { EffectComposer, Bloom, Vignette } from "@react-three/postprocessing";
@@ -14,6 +14,7 @@ import NameLabels from "./scene/NameLabels";
 import CameraRig, { createHandoff } from "./scene/CameraRig";
 import ExploreControls from "./scene/ExploreControls";
 import type { Quality, SceneMode, SpinState, FlyRequest } from "./scene/constants";
+import { WindClock, windUniforms } from "./scene/wind";
 
 export type { Quality, SceneMode, SpinState, FlyRequest };
 
@@ -47,8 +48,18 @@ function SceneContent(props: SceneProps & { lowPerf: boolean }) {
   const [nearby, setNearby] = useState<string[]>([]);
   const onNearby = useCallback((ids: string[]) => setNearby(ids), []);
 
+  const wind = useMemo(() => new WindClock(), []);
+  useEffect(() => {
+    windUniforms.uCrownBase.value = layout.trunk.topY + 1;
+    windUniforms.uCrownTop.value = layout.heightOf(layout.maxGen);
+    windUniforms.uCrownR.value = layout.crown.radius;
+    windUniforms.uWindOn.value = reducedMotion ? 0 : 1;
+  }, [layout, reducedMotion]);
+
   useFrame((_, dt) => {
     if (growth.current < 1) growth.current = Math.min(1, growth.current + dt / 4.2);
+    // Gió chỉ nổi khi cây đã mọc xong
+    wind.update(Math.min(dt, 0.1), !reducedMotion && growth.current >= 1);
   });
 
   const top = layout.heightOf(layout.maxGen);

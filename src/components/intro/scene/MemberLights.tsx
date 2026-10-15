@@ -7,6 +7,7 @@ import { isAlive } from "../../../types";
 import type { TreeLayout, LayoutNode } from "../../../lib/treeLayout3d";
 import { makeOrbMaterial, makeLeafMaterial, leafHalfWidth } from "./shaders";
 import { GOLD, GOLD_HIGHLIGHT, JADE, JADE_HIGHLIGHT, easeOutCubic } from "./constants";
+import { windOffset, windUniforms } from "./wind";
 
 /** Chiều dài cuống lá (đơn vị hình lá, trước khi nhân tỉ lệ) */
 const PETIOLE = 0.3;
@@ -176,11 +177,17 @@ export default function MemberLights({ layout, highlightIds, selectedId, hoverId
 
     const leaf = leafRef.current;
     if (leaf) {
+      const gust = windUniforms.uGust.value;
       leafNodes.forEach((n, i) => {
         const ph = phaseOf(n);
         const s = LEAF_SCALE * emphasis(n.member.id) * (reduced ? 1 : 1 + 0.05 * Math.sin(t * 1.6 + ph)) * appearOf(n);
         dummy.position.set(n.position[0], n.position[1], n.position[2]);
-        dummy.rotation.set(0, Math.PI / 2 - n.angle, reduced ? 0 : 0.1 * Math.sin(t * 1.25 + ph));
+        // Lá đung đưa nhẹ, gặp gió thì lật qua lật lại mạnh và nhanh hơn
+        dummy.rotation.set(
+          reduced ? 0 : 0.22 * gust * Math.sin(t * 2.7 + ph * 1.3),
+          Math.PI / 2 - n.angle,
+          reduced ? 0 : (0.1 + 0.3 * gust) * Math.sin(t * (1.25 + 1.4 * gust) + ph)
+        );
         dummy.scale.set(s * 0.5, s, s);
         dummy.updateMatrix();
         leaf.setMatrixAt(i, dummy.matrix);
@@ -195,9 +202,10 @@ export default function MemberLights({ layout, highlightIds, selectedId, hoverId
       if (n && appearOf(n) > 0.5) {
         const alive = isAlive(n.member);
         const [x, y, z] = alive ? visualCenter(n) : orbPlacement(n).pos;
+        const w = windOffset(n.position, alive ? 0.12 : 0);
         const base = alive ? 0.44 : orbPlacement(n).scale;
         ring.visible = true;
-        ring.position.set(x, y, z);
+        ring.position.set(x + w[0], y + w[1], z + w[2]);
         ring.quaternion.copy(camera.quaternion);
         ring.rotateZ(t * 0.6);
         ring.scale.setScalar(base * 1.9 * (1 + 0.06 * Math.sin(t * 2.4)));

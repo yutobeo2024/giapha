@@ -4,6 +4,7 @@ import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import type { TreeLayout } from "../../../lib/treeLayout3d";
 import { isAlive } from "../../../types";
+import { windOffset } from "./wind";
 
 /** Nhãn tên trên đốm sáng: chiếu lên màn hình mỗi khung hình, dời lên/xuống để tránh chồng nhau, hết chỗ thì ẩn */
 export default function NameLabels({ layout, ids }: { layout: TreeLayout; ids: string[] }) {
@@ -20,9 +21,16 @@ export default function NameLabels({ layout, ids }: { layout: TreeLayout; ids: s
       const el = refs.current.get(id);
       const n = layout.byId.get(id);
       if (!el || !n) return;
+      // Nhãn neo ở vị trí tĩnh (Html), cộng thêm phần lệch do gió để bám theo đèn
       v.set(n.position[0], n.position[1], n.position[2]).project(camera);
+      const x0 = (v.x * 0.5 + 0.5) * size.width;
+      const y0 = (-v.y * 0.5 + 0.5) * size.height;
+      const wo = windOffset(n.position, isAlive(n.member) ? 0.12 : 0);
+      v.set(n.position[0] + wo[0], n.position[1] + wo[1], n.position[2] + wo[2]).project(camera);
       const x = (v.x * 0.5 + 0.5) * size.width;
       const y = (-v.y * 0.5 + 0.5) * size.height;
+      const wx = x - x0;
+      const wy = y - y0;
       const w = el.offsetWidth || 120;
       const h = el.offsetHeight || 34;
       let chosen: [number, number] | null = null;
@@ -40,7 +48,7 @@ export default function NameLabels({ layout, ids }: { layout: TreeLayout; ids: s
       }
       const behind = v.z > 1;
       el.style.opacity = chosen === null || behind ? "0" : "1";
-      el.style.transform = `translate(calc(-50% + ${chosen?.[0] ?? 0}px), calc(-100% - 14px + ${chosen?.[1] ?? 0}px))`;
+      el.style.transform = `translate(calc(-50% + ${(chosen?.[0] ?? 0) + wx}px), calc(-100% - 14px + ${(chosen?.[1] ?? 0) + wy}px))`;
     });
   });
 

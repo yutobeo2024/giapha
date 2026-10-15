@@ -45,15 +45,19 @@ export interface TreeLayout {
   groundY: number;
   /** Thân chính: bán kính ở gốc (đã loe) và ở đỉnh (chỗ chia cành), độ cao đỉnh, độ loe của gốc trên mặt đất */
   trunk: { baseRadius: number; topRadius: number; topY: number; rootSpread: number };
+  /** Kích thước tán (để hiệu ứng gió biết phần nào mềm, phần nào cứng) */
+  crown: { height: number; radius: number };
 }
 
 /** Khoảng cách dọc tham chiếu giữa hai đời (camera dùng để chừa lề) */
 export const GEN_HEIGHT = 1.5;
 /** Bán kính đầu cành (ngọn thon) */
 export const TIP_RADIUS = 0.04;
-/** Bán kính thân ở chỗ chia cành, cố định để cây không phình to khi gia phả thêm người */
+/** Bán kính thân ở chỗ Thủy tổ, cố định để cây không phình to khi gia phả thêm người */
 const TRUNK_TOP_RADIUS = 1.35;
 const TRUNK_FLARE = 1.9;
+/** Dòng kế thừa còn gánh ít nhất chừng này hậu duệ thì thân cây vẫn đi tiếp qua người đó */
+const SPINE_SHARE = 0.6;
 
 /** Hash ổn định từ chuỗi → [0,1) để nhiễu không đổi giữa các lần render */
 function hash01(s: string, salt = 0): number {
@@ -75,10 +79,12 @@ function pipeRadiusOf(leaves: number, rootLeaves: number): number {
 
 const DEG = Math.PI / 180;
 const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
+
 const v3 = {
   sub: (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
   add: (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
   scale: (a: Vec3, s: number): Vec3 => [a[0] * s, a[1] * s, a[2] * s],
+  dot: (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
   len: (a: Vec3) => Math.hypot(a[0], a[1], a[2]),
   norm: (a: Vec3): Vec3 => {
     const l = Math.hypot(a[0], a[1], a[2]) || 1;
@@ -87,10 +93,34 @@ const v3 = {
   cross: (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
 };
 
+/** Xoay hướng `from` về phía `to` nhưng không quá `maxAngle` (radian): cành đổi hướng từ từ, không gãy khúc */
+function rotateTowards(from: Vec3, to: Vec3, maxAngle: number): Vec3 {
+  const f = v3.norm(from);
+  const t = v3.norm(to);
+  const cos = clamp(v3.dot(f, t), -1, 1);
+  const ang = Math.acos(cos);
+  if (ang <= maxAngle || ang < 1e-4) return t;
+  const k = maxAngle / ang;
+  const s = Math.sin(ang);
+  const w0 = Math.sin((1 - k) * ang) / s;
+  const w1 = Math.sin(k * ang) / s;
+  return v3.norm(v3.add(v3.scale(f, w0), v3.scale(t, w1)));
+}
+
+/** Hai vectơ vuông góc với `d` (để xoay quanh trục d) */
+function basis(d: Vec3): [Vec3, Vec3] {
+  const helper: Vec3 = Math.abs(d[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+  const p1 = v3.norm(v3.cross(d, helper));
+  const p2 = v3.norm(v3.cross(d, p1));
+  return [p1, p2];
+}
+
 /**
- * Tính bố cục cây 3D kiểu cây thật: Thủy tổ ở đỉnh thân, mỗi người là một mắt cành mọc ra từ cành của cha;
- * nhánh gánh nhiều hậu duệ thì to, đi thẳng và dài; nhánh ít hậu duệ thì mảnh, tách ra góc lớn.
- * Sau đó co giãn tán thành vòm tròn và nối các mắt cành thành chuỗi gỗ liền mạch.
+ * Bố cục cây 3D theo dáng cây cổ thụ thật:
+ * - Thân: một đường cong liền từ rễ lên qua các đời đầu (dòng kế thừa gánh hầu hết hậu duệ), nghiêng nhẹ.
+ * - Cành: mỗi người có con là một mắt cành; cành mọc tiếp theo hướng cành mẹ và từ từ ngoặt về phần tán
+ *   được chia cho nhánh mình (chếch lên ở gốc cành, ngả dần ra ngoài, cành mảnh rủ ở ngọn).
+ * - Người không có con không thành cành riêng mà treo thành chùm ở đầu cành của cha, như chùm lá.
  */
 export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
   const byIdMember = new Map(members.map((m) => [m.id, m]));
@@ -109,6 +139,7 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
   const roots = members.filter((m) => !parentOf(m)).sort((a, b) => a.generation - b.generation || a.name.localeCompare(b.name, "vi"));
   const minGen = members.length ? Math.min(...members.map((m) => m.generation)) : 1;
   const maxGen = members.length ? Math.max(...members.map((m) => m.generation)) : 1;
+  const hasKids = (id: string) => (children.get(id) || []).length > 0;
 
   const leafMemo = new Map<string, number>();
   const leavesOf = (id: string): number => {
@@ -118,14 +149,7 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     leafMemo.set(id, v);
     return v;
   };
-
-  const nodes: LayoutNode[] = [];
-  const byId = new Map<string, LayoutNode>();
-  const rootLeaves = Math.max(1, ...roots.map((r) => leavesOf(r.id)));
-  const kidsByLeaves = (id: string) =>
-    [...(children.get(id) || [])].sort((a, b) => leavesOf(b.id) - leavesOf(a.id) || a.name.localeCompare(b.name, "vi"));
-
-  // Độ sâu còn lại phía dưới mỗi người (số đời con cháu nối tiếp dài nhất)
+  // Số đời con cháu nối tiếp dài nhất phía dưới mỗi người
   const restMemo = new Map<string, number>();
   const restOf = (id: string): number => {
     if (restMemo.has(id)) return restMemo.get(id)!;
@@ -134,56 +158,137 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     restMemo.set(id, v);
     return v;
   };
+  const kidsByLeaves = (id: string) =>
+    [...(children.get(id) || [])].sort((a, b) => leavesOf(b.id) - leavesOf(a.id) || a.name.localeCompare(b.name, "vi"));
+  const woodKids = (id: string) => kidsByLeaves(id).filter((k) => hasKids(k.id));
+  const leafKids = (id: string) => kidsByLeaves(id).filter((k) => !hasKids(k.id));
 
-  /**
-   * Tán như cây sồi cổ thụ: cành cái tỏa ra từ đỉnh thân, phủ kín một vòm tròn.
-   * Mỗi người nhận một "ô" trên vòm (khoảng góc quanh thân × khoảng độ cao) tỉ lệ với số con cháu,
-   * ô của cha được chia cho các con theo chiều dài hơn, chỗ chia lệch ngẫu nhiên ổn định theo id.
-   * Người đứng ở hướng giữa ô, càng nhiều đời con cháu phía sau thì càng gần đỉnh thân.
-   */
+  // ---------------------------------------------------------------- kích thước
+  const genSpan = Math.max(1, maxGen - minGen);
+  // Tỉ lệ cây sồi cổ thụ: tán rộng hơn cao, thân cao chừng một phần ba cả cây
+  const CROWN_H = 4 + 0.8 * genSpan;
+  const CROWN_R = 0.85 * CROWN_H;
+  const GROUND_Y = -Math.max(4.5, 0.38 * CROWN_H);
+  const trunkTop = TRUNK_TOP_RADIUS;
+  const trunkBase = trunkTop * TRUNK_FLARE;
+  const rootLeaves = Math.max(1, ...roots.map((r) => leavesOf(r.id)));
+
+  // ---------------------------------------------------------------- thân chính (spine)
+  // Thân cây đi tiếp qua người con gánh hầu hết hậu duệ, cho tới khi dòng họ thật sự chia nhánh
+  const spine: FamilyMember[] = [];
+  if (roots.length) {
+    let cur = roots[0];
+    spine.push(cur);
+    const maxSpine = Math.max(2, Math.round(genSpan * 0.45));
+    for (;;) {
+      const kids = kidsByLeaves(cur.id);
+      if (!kids.length) break;
+      const main = kids[0];
+      if (!hasKids(main.id) || leavesOf(main.id) / leavesOf(cur.id) < SPINE_SHARE || spine.length >= maxSpine) break;
+      spine.push(main);
+      cur = main;
+    }
+  }
+  const spineDepth = new Map(spine.map((m, i) => [m.id, i]));
+  // Các đời trên thân xếp sát nhau: thân chia cành trong một đoạn ngắn như cây sồi, không vươn thành cột cao
+  const spineY = (k: number) => k * 0.75;
+  /** Chiều dài trung bình một đoạn cành ứng với một đời, sao cho dòng dài nhất vươn tới mép tán */
+  const STEP = (1.25 * CROWN_R) / Math.max(4, genSpan - spine.length + 2);
+  const spineTopY = spineY(spine.length - 1);
+  // Thân nghiêng nhẹ về một hướng cố định, cong dần (không gấp khúc)
+  const leanAz = hash01(roots[0]?.id ?? "x", 11) * Math.PI * 2;
+  const LEAN = 0.055 * CROWN_H;
+  const leanAt = (y: number): [number, number] => {
+    const t = clamp((y - GROUND_Y) / Math.max(1, spineTopY - GROUND_Y), 0, 1.4);
+    const off = LEAN * Math.pow(t, 2.2);
+    return [Math.cos(leanAz) * off, Math.sin(leanAz) * off];
+  };
+  const spinePos = (k: number): Vec3 => {
+    const y = spineY(k);
+    const [lx, lz] = leanAt(y);
+    return [lx, y, lz];
+  };
+
+  // ---------------------------------------------------------------- đặt mắt cành
+  const nodes: LayoutNode[] = [];
+  const byId = new Map<string, LayoutNode>();
+  const dirOf = new Map<string, Vec3>();
   const E_MIN = 4 * DEG;
   const E_MAX = 84 * DEG;
   type Cell = { a0: number; a1: number; u0: number; u1: number };
   const elevOf = (u: number) => Math.asin(Math.sin(E_MIN) + (Math.sin(E_MAX) - Math.sin(E_MIN)) * u);
-  const place = (m: FamilyMember, cell: Cell, depth: number, isRoot: boolean) => {
-    const hasKids = (children.get(m.id) || []).length > 0;
+
+  /**
+   * Mỗi nhánh nhận một "ô" trên vòm tán (khoảng góc quanh thân × dải độ cao) tỉ lệ với số con cháu,
+   * ô của cha chia cho các con theo chiều dài hơn. Người càng nhiều đời con cháu phía sau càng gần
+   * thân, nên mỗi dòng đi dần từ trong ra mép tán. Vị trí "đích" ấy là nơi cành muốn tới; cành thật
+   * mọc từ mắt cành của cha theo hướng cũ rồi ngoặt dần về đích (mỗi đời đổi hướng có hạn, đoạn cành
+   * có độ dài tối đa), nên cành cong mềm, cành mảnh không thành que dài thẳng tắp.
+   */
+  const place = (m: FamilyMember, cell: Cell, parent: LayoutNode | null, dirIn: Vec3) => {
+    const leaves = leavesOf(m.id);
+    const depth = m.generation - minGen;
+    const sk = spineDepth.get(m.id);
     const j = (salt: number) => hash01(m.id, salt) - 0.5;
-    const a = (cell.a0 + cell.a1) / 2 + j(1) * (cell.a1 - cell.a0) * 0.35;
-    const u = clamp((cell.u0 + cell.u1) / 2 + j(2) * (cell.u1 - cell.u0) * 0.35, 0, 1);
-    // Ô càng lớn (nhánh gánh càng nhiều hậu duệ) thì càng vươn thẳng lên như thân, cành cái; ô nhỏ mới ngả theo hướng ô
-    const big = clamp(((cell.a1 - cell.a0) / (Math.PI * 2)) * (cell.u1 - cell.u0) * 2.2, 0, 1);
-    const e = elevOf(u) + (88 * DEG - elevOf(u)) * Math.pow(big, 0.7);
-    // Khoảng cách từ đỉnh thân: theo phần đường đã đi trên dòng của mình, lẫn theo số đời (để các đời không thành lớp)
-    const rest = restOf(m.id);
-    const frac = depth === 0 ? 0 : 0.55 * (depth / (depth + rest)) + 0.45 * Math.min(1, depth / Math.max(1, maxGen - minGen));
-    const rho = depth === 0 ? 0 : Math.pow(frac, 0.85) * (1 + j(3) * 0.22);
-    const ce = Math.cos(e);
-    const pos: Vec3 = [ce * Math.cos(a) * rho, Math.sin(e) * rho, ce * Math.sin(a) * rho];
+    let pos: Vec3;
+    let dir: Vec3;
+    if (sk !== undefined) {
+      pos = spinePos(sk);
+      dir = sk === 0 ? [0, 1, 0] : v3.norm(v3.sub(pos, spinePos(sk - 1)));
+    } else if (!parent) {
+      pos = [0, 0, 0];
+      dir = [0, 1, 0];
+    } else {
+      // Đích trên vòm
+      const a = (cell.a0 + cell.a1) / 2 + j(1) * (cell.a1 - cell.a0) * 0.35;
+      const u = clamp((cell.u0 + cell.u1) / 2 + j(2) * (cell.u1 - cell.u0) * 0.35, 0, 1);
+      // Ô càng lớn (nhánh gánh càng nhiều hậu duệ) thì càng vươn lên như cành cái; ô nhỏ ngả theo hướng ô
+      const big = clamp(((cell.a1 - cell.a0) / (Math.PI * 2)) * (cell.u1 - cell.u0) * 2.2, 0, 1);
+      const e = elevOf(u) + (88 * DEG - elevOf(u)) * Math.pow(big, 0.7);
+      const rest = restOf(m.id);
+      const frac = 0.55 * (depth / (depth + rest)) + 0.45 * Math.min(1, depth / genSpan);
+      const rho = Math.pow(frac, 0.85) * (1 + j(3) * 0.22);
+      const ce = Math.cos(e);
+      const px = ce * Math.cos(a) * rho;
+      const pz = ce * Math.sin(a) * rho;
+      const out = Math.hypot(px, pz);
+      // Cành cái vươn xiên lên khỏi đỉnh thân rồi mới xòe: tán ngồi trên thân như cây sồi
+      const target: Vec3 = [px * CROWN_R, Math.sin(e) * rho * CROWN_H * 0.95 + Math.min(1, out * 2.2) * CROWN_H * 0.22, pz * CROWN_R];
+      // Mọc từ cha về phía đích: đổi hướng có hạn, đoạn cành có độ dài tối đa
+      const share = leaves / Math.max(1, parent.leaves);
+      const d = v3.sub(target, parent.position);
+      const dist = v3.len(d) || 1e-3;
+      const maxTurn = (22 + 32 * Math.pow(1 - clamp(share, 0, 1), 0.7)) * DEG;
+      dir = rotateTowards(dirIn, v3.scale(d, 1 / dist), maxTurn);
+      const bigness = Math.min(1, Math.log10(1 + leaves) / 2.2);
+      const len = Math.min(dist, STEP * (0.7 + 1.1 * bigness) * (1 + j(4) * 0.2));
+      pos = v3.add(parent.position, v3.scale(dir, Math.max(0.45, len)));
+    }
     const node: LayoutNode = {
       member: m,
       position: pos,
-      angle: a,
-      leaves: leavesOf(m.id),
-      isRoot,
-      woodRadius: hasKids ? pipeRadiusOf(leavesOf(m.id), rootLeaves) : 0,
+      angle: Math.atan2(pos[2], pos[0]),
+      leaves,
+      isRoot: !parent,
+      woodRadius: hasKids(m.id) ? pipeRadiusOf(leaves, rootLeaves) : 0,
     };
     nodes.push(node);
     byId.set(m.id, node);
+    dirOf.set(m.id, dir);
 
-    // Chia ô cho các con: con đông hậu duệ ở giữa, con ít hậu duệ xen hai bên
-    const sorted = kidsByLeaves(m.id);
+    // Chia ô cho các con có con: con đông hậu duệ ở giữa, con ít hậu duệ xen hai bên
+    const sorted = woodKids(m.id);
     const kids: FamilyMember[] = [];
     sorted.forEach((k, i) => (i % 2 ? kids.push(k) : kids.unshift(k)));
     const total = kids.reduce((s, k) => s + Math.pow(leavesOf(k.id), 0.92), 0) || 1;
     const midE = elevOf((cell.u0 + cell.u1) / 2);
     const widthA = (cell.a1 - cell.a0) * Math.cos(midE);
     const widthU = (elevOf(cell.u1) - elevOf(cell.u0)) * 1.1;
-    // Ô hẹp thì chia theo chiều dài hơn; lệch thêm theo độ sâu để các tầng xen kẽ
-    const byAzimuth = depth === 0 || widthA * (0.8 + 0.4 * hash01(m.id, 4)) >= widthU;
+    // Ô hẹp thì chia theo chiều cao; thân chính luôn chia theo góc quanh thân
+    const byAzimuth = sk !== undefined || widthA * (0.8 + 0.4 * hash01(m.id, 4)) >= widthU;
     let cursor = 0;
     for (const k of kids) {
       const w = Math.pow(leavesOf(k.id), 0.92) / total;
-      // Lấn sang ô bên cạnh một chút để đường chia không thẳng tắp
       const wobble = (hash01(k.id, 5) - 0.5) * w * 0.25;
       const f0 = cursor;
       const f1 = Math.min(1, cursor + w + wobble);
@@ -191,32 +296,69 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
       const sub: Cell = byAzimuth
         ? { a0: cell.a0 + (cell.a1 - cell.a0) * f0, a1: cell.a0 + (cell.a1 - cell.a0) * f1, u0: cell.u0, u1: cell.u1 }
         : { a0: cell.a0, a1: cell.a1, u0: cell.u0 + (cell.u1 - cell.u0) * f0, u1: cell.u0 + (cell.u1 - cell.u0) * f1 };
-      place(k, sub, depth + 1, false);
+      place(k, sub, node, dir);
     }
   };
   const turn = roots.length ? hash01(roots[0].id, 7) * Math.PI * 2 : 0;
   roots.forEach((r, i) => {
     const span = (Math.PI * 2) / roots.length;
-    place(r, { a0: turn + i * span, a1: turn + (i + 1) * span, u0: 0, u1: 1 }, i === 0 ? 0 : 1, true);
+    place(r, { a0: turn + i * span, a1: turn + (i + 1) * span, u0: 0, u1: 1 }, null, [0, 1, 0]);
   });
   const mainRoot = nodes[0];
 
-  // ---- Tỉ lệ theo dáng cây sồi: tán rộng hơn cao, thân chừng một phần ba chiều cao cả cây
-  const genSpan = Math.max(1, maxGen - minGen);
-  const CROWN_H = 4 + 0.7 * genSpan;
-  const CROWN_R = 1.05 * CROWN_H;
-  const crown = nodes.filter((n) => n !== mainRoot);
+  // Người không có con: treo thành chùm quanh đầu cành của cha (hoặc nhú ra từ thân nếu cha ở trên thân)
+  const leafNodes: LayoutNode[] = [];
+  const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+  for (const n of [...nodes]) {
+    const lk = leafKids(n.member.id);
+    if (!lk.length) continue;
+    const d = dirOf.get(n.member.id) || [0, 1, 0];
+    const [p1, p2] = basis(d);
+    const onSpine = spineDepth.has(n.member.id);
+    lk.forEach((k, i) => {
+      const h = (s: number) => hash01(k.id, s);
+      const phi = GOLDEN * i + h(6) * Math.PI * 2;
+      let pos: Vec3;
+      if (onSpine) {
+        const out = n.woodRadius * 0.9 + 0.9 + 0.35 * h(7);
+        const up = 0.45 + 0.4 * h(8);
+        pos = [n.position[0] + Math.cos(phi) * out, n.position[1] + up, n.position[2] + Math.sin(phi) * out];
+      } else {
+        const theta = (30 + 45 * h(7)) * DEG;
+        const len = 0.38 + 0.42 * h(8) + 0.035 * Math.min(10, lk.length);
+        const side = v3.add(v3.scale(p1, Math.cos(phi)), v3.scale(p2, Math.sin(phi)));
+        pos = v3.add(n.position, v3.add(v3.scale(d, len * Math.cos(theta)), v3.scale(side, len * Math.sin(theta))));
+        pos[1] -= 0.08;
+      }
+      const node: LayoutNode = { member: k, position: pos, angle: Math.atan2(pos[2], pos[0]), leaves: 1, isRoot: false, woodRadius: 0 };
+      nodes.push(node);
+      byId.set(k.id, node);
+      leafNodes.push(node);
+    });
+  }
+  const isLeafNode = (n: LayoutNode) => n.woodRadius === 0 && !n.isRoot;
+
+  // ---- Tán giữ trong vòm: mắt cành vượt ra ngoài đường bao ellipsoid thì kéo vào (giữ một phần cho mép tán không phẳng lì)
+  const crown = nodes.filter((n) => !spineDepth.has(n.member.id));
   for (const n of crown) {
-    const [x, y, z] = n.position;
-    // Gốc tán hơi nâng lên: cành cái vươn xiên lên rồi mới xòe
-    const out = Math.hypot(x, z);
-    // Cành cái vươn xiên lên khỏi đỉnh thân rồi mới xòe: tán ngồi trên thân như cây sồi
-    n.position = [x * CROWN_R, y * CROWN_H * 0.95 + Math.min(1, out * 2.2) * CROWN_H * 0.22, z * CROWN_R];
+    let [x, y, z] = n.position;
+    // Đỉnh tán bo tròn: vượt quá chiều cao tán thì ép mềm chứ không cắt phẳng
+    y = Math.max(1.0, y > CROWN_H ? CROWN_H + (y - CROWN_H) * 0.35 : y);
+    const t = y / CROWN_H;
+    const env = CROWN_R * Math.sqrt(Math.max(0.1, 1 - Math.pow((t - 0.5) / 0.62, 2)));
+    const r = Math.hypot(x, z);
+    if (r > env) {
+      const nr = env + (r - env) * 0.3;
+      x *= nr / r;
+      z *= nr / r;
+    }
+    n.position = [x, y, z];
   }
 
-  // ---- Đẩy các mắt cành quá sát nhau ra (lưới không gian, vài vòng)
-  const MIN_D = 0.62;
-  const cell = (p: Vec3) => [Math.floor(p[0] / MIN_D), Math.floor(p[1] / MIN_D), Math.floor(p[2] / MIN_D)];
+  // ---- Đẩy các mắt cành, chùm lá quá sát nhau ra (lưới không gian, vài vòng)
+  const radiusOfNode = (n: LayoutNode) => (isLeafNode(n) ? 0.2 : 0.32);
+  const CELL = 0.65;
+  const cell = (p: Vec3) => [Math.floor(p[0] / CELL), Math.floor(p[1] / CELL), Math.floor(p[2] / CELL)];
   for (let iter = 0; iter < 6; iter++) {
     const grid = new Map<string, LayoutNode[]>();
     for (const n of crown) {
@@ -232,10 +374,11 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
           for (let dz = -1; dz <= 1; dz++) {
             for (const o of grid.get(`${cx + dx},${cy + dy},${cz + dz}`) || []) {
               if (o === n || o.member.id < n.member.id) continue;
+              const minD = radiusOfNode(n) + radiusOfNode(o);
               const d = v3.sub(o.position, n.position);
               const dist = v3.len(d);
-              if (dist >= MIN_D || dist === 0) continue;
-              const push = v3.scale(v3.norm([d[0], d[1] * 0.4, d[2]]), (MIN_D - dist) / 2);
+              if (dist >= minD || dist === 0) continue;
+              const push = v3.scale(v3.norm([d[0], d[1] * 0.5, d[2]]), (minD - dist) / 2);
               n.position = v3.sub(n.position, push);
               o.position = v3.add(o.position, push);
               moved++;
@@ -244,23 +387,22 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     }
     if (!moved) break;
   }
-  for (const n of nodes) n.angle = ((Math.atan2(n.position[2], n.position[0]) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
 
-  // ---- Cành nhỏ không đâm xuyên cành to: mắt cành nằm trong "ống" quanh một cành to thì đẩy ra ngoài
+  // ---- Cành nhỏ, chùm lá không đâm xuyên cành to: nằm trong "ống" quanh một cành to thì đẩy ra ngoài
   const segDist = (p: Vec3, a: Vec3, b: Vec3) => {
     const ab = v3.sub(b, a);
-    const t = clamp(((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1] + (p[2] - a[2]) * ab[2]) / (ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2 || 1), 0, 1);
+    const t = clamp(v3.dot(v3.sub(p, a), ab) / (v3.dot(ab, ab) || 1), 0, 1);
     const q = v3.add(a, v3.scale(ab, t));
     return { d: v3.len(v3.sub(p, q)), q };
   };
   const thickSegs = nodes
-    .filter((n) => !n.isRoot && n.woodRadius >= 0.16 && parentOf(n.member))
+    .filter((n) => !n.isRoot && n.woodRadius >= 0.16 && parentOf(n.member) && !spineDepth.has(n.member.id))
     .map((n) => ({ a: byId.get(parentOf(n.member)!)!, b: n, r: n.woodRadius }));
   for (let iter = 0; iter < 3; iter++) {
     for (const n of crown) {
       for (const sg of thickSegs) {
         if (n === sg.a || n === sg.b) continue;
-        const clear = sg.r * 1.25 + 0.38;
+        const clear = sg.r * 1.25 + 0.36;
         const { d, q } = segDist(n.position, sg.a.position, sg.b.position);
         if (d >= clear) continue;
         let dir = v3.sub(n.position, q);
@@ -269,6 +411,7 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
       }
     }
   }
+  for (const n of nodes) n.angle = ((Math.atan2(n.position[2], n.position[0]) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
 
   // ---- Độ cao và độ xòe đặc trưng của mỗi đời (camera, chip chọn đời)
   const genStats = new Map<number, { sumY: number; n: number; rs: number[] }>();
@@ -294,84 +437,63 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     }
   }
   const heightOf = (gen: number) => meanY.get(gen) ?? (gen - minGen) * GEN_HEIGHT;
-
-  // Thân chính: thon và cao, loe ở gốc
-  const trunkTop = TRUNK_TOP_RADIUS;
-  const trunkBase = trunkTop * TRUNK_FLARE;
-  const GROUND_Y = -Math.max(5, 0.72 * CROWN_H);
   if (mainRoot) mainRoot.woodRadius = trunkTop;
 
   // ---------------------------------------------------------------- chuỗi gỗ liền mạch
   const chains: LayoutChain[] = [];
   const radiusAt = (n: LayoutNode) => (n.isRoot ? trunkTop : n.woodRadius || TIP_RADIUS);
-  /** Số cành con mọc ra tại nút: thân hơi phình (cổ cành) như cây thật */
-  const collarAt = (n: LayoutNode) => 1 + 0.05 * Math.min(3, Math.max(0, (children.get(n.member.id) || []).length - 1));
+  const isSpine = (n: LayoutNode) => spineDepth.has(n.member.id);
+  /** Số cành con mọc ra tại nút: cành hơi phình (cổ cành); thân chính không phình để không gồ ghề */
+  const collarAt = (n: LayoutNode) => (isSpine(n) ? 1 : 1 + 0.04 * Math.min(3, Math.max(0, woodKids(n.member.id).length - 1)));
 
-  /** Điểm uốn giữa hai nút: vồng lên rồi tỏa ra, lệch ngang một chút (cành mảnh uốn nhiều hơn) */
-  const midPoint = (a: LayoutNode, b: LayoutNode): Vec3 => {
+  /** Điểm uốn giữa hai mắt cành: vồng nhẹ lên và lệch ngang một chút, cành mảnh uốn nhiều hơn */
+  const midArc = (a: LayoutNode, b: LayoutNode): Vec3 => {
     const d = v3.sub(b.position, a.position);
     const dist = v3.len(d) || 1;
-    const side = v3.norm(v3.cross(d, [0, 1, 0]));
-    const thin = 1 - Math.min(1, radiusAt(b) / 0.4);
-    const lift = dist * (0.1 + 0.16 * thin);
-    const wobble = (hash01(b.member.id, 3) - 0.5) * dist * (0.12 + 0.3 * thin);
+    const [side] = basis(d);
+    const thin = 1 - Math.min(1, radiusAt(b) / 0.35);
+    const lift = dist * (0.05 + 0.09 * thin);
+    const wobble = (hash01(b.member.id, 3) - 0.5) * dist * (0.05 + 0.14 * thin);
     return v3.add(v3.add(v3.add(a.position, v3.scale(d, 0.5)), [0, lift, 0]), v3.scale(side, wobble));
   };
 
-  /**
-   * Thêm các điểm uốn giữa hai mắt cành vào chuỗi. Cành to: một điểm vồng nhẹ. Cành mảnh: vồng lên
-   * rồi rủ xuống về mắt cành như cành lá mềm, lượn ngang một chút, chứ không thẳng đuột như que khô.
-   */
-  const pushArc = (chain: LayoutChain, a: LayoutNode, b: LayoutNode, rMid: number, gMid: number) => {
-    const rb = radiusAt(b);
-    if (rb >= 0.2) {
-      chain.points.push(midPoint(a, b));
-      chain.radii.push(rMid);
-      chain.gens.push(gMid);
-      return;
-    }
-    const d = v3.sub(b.position, a.position);
-    const dist = v3.len(d) || 1;
-    const side = v3.norm(v3.cross(d, [0, 1, 0]));
-    const sway = (hash01(b.member.id, 3) - 0.5) * 2;
-    const arch = dist * (0.2 + 0.14 * hash01(b.member.id, 12));
-    for (const t of [0.3, 0.62, 0.86]) {
-      const lift = arch * Math.sin(Math.PI * t) * (t > 0.8 ? 0.55 : 1);
-      const p = v3.add(v3.add(v3.add(a.position, v3.scale(d, t)), [0, lift, 0]), v3.scale(side, sway * dist * 0.16 * Math.sin(Math.PI * t)));
-      chain.points.push(p);
-      chain.radii.push(rMid * (1 - 0.25 * t));
-      chain.gens.push(gMid - 0.4 + t * 0.7);
-    }
+  /** Ngọn cành: vươn thêm một đoạn ngắn, thon dần và rủ nhẹ xuống như đầu cành non */
+  const finishTip = (chain: LayoutChain) => {
+    const n = chain.points.length;
+    if (n < 2) return;
+    const dir = v3.norm(v3.sub(chain.points[n - 1], chain.points[n - 2]));
+    const flat = v3.norm([dir[0], Math.min(dir[1], 0.15), dir[2]]);
+    const last = chain.points[n - 1];
+    const g = chain.gens[n - 1];
+    chain.points.push(v3.add(last, v3.add(v3.scale(flat, 0.3), [0, -0.04, 0])));
+    chain.radii.push(Math.max(TIP_RADIUS * 1.3, chain.radii[n - 1] * 0.55));
+    chain.gens.push(g);
+    chain.points.push(v3.add(last, v3.add(v3.scale(flat, 0.55), [0, -0.14, 0])));
+    chain.radii.push(TIP_RADIUS * 0.75);
+    chain.gens.push(g);
   };
 
-  /** Nối tiếp chuỗi từ nút `from` theo dòng chính (con nhiều hậu duệ nhất); các con khác thành chuỗi riêng */
+  /** Nối tiếp chuỗi từ nút `from` theo dòng chính (con có con nhiều hậu duệ nhất); các con khác thành chuỗi riêng */
   const extend = (chain: LayoutChain, from: LayoutNode, prevPos: Vec3) => {
     let cur = from;
     for (;;) {
-      const kids = kidsByLeaves(cur.member.id);
+      const kids = woodKids(cur.member.id);
       if (!kids.length) break;
       const main = byId.get(kids[0].id)!;
-      // Hướng cành mẹ tại nút: từ nút trước tới con chính
       const tangent = v3.norm(v3.sub(main.position, prevPos));
       for (const k of kids.slice(1)) startSide(cur, byId.get(k.id)!, tangent);
       prevPos = cur.position;
-      const leaf = !(children.get(main.member.id) || []).length;
       const rMain = radiusAt(main);
-      pushArc(chain, cur, main, leaf ? Math.max(TIP_RADIUS * 1.6, Math.min(0.09, radiusAt(cur) * 0.45)) : rMain * 1.08, main.member.generation - 0.5);
+      const rCur = radiusAt(cur);
+      chain.points.push(midArc(cur, main));
+      chain.radii.push(isSpine(main) ? (rCur + rMain) / 2 : Math.min(rCur, rMain * 1.08));
+      chain.gens.push(main.member.generation - 0.5);
       chain.points.push(main.position);
-      chain.radii.push(leaf ? TIP_RADIUS * 1.35 : rMain * collarAt(main));
+      chain.radii.push(rMain * collarAt(main));
       chain.gens.push(main.member.generation);
       cur = main;
     }
-    // Ngọn thon, rủ nhẹ xuống như đầu cành non
-    const n = chain.points.length;
-    if (n >= 2) {
-      const dir = v3.norm(v3.sub(chain.points[n - 1], chain.points[n - 2]));
-      const flat = v3.norm([dir[0], Math.min(dir[1], 0.1), dir[2]]);
-      chain.points.push(v3.add(chain.points[n - 1], v3.add(v3.scale(flat, 0.16), [0, -0.05, 0])));
-      chain.radii.push(TIP_RADIUS * 0.8);
-      chain.gens.push(chain.gens[n - 1]);
-    }
+    finishTip(chain);
   };
 
   /**
@@ -380,54 +502,55 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
    */
   const startSide = (at: LayoutNode, child: LayoutNode, tangent: Vec3) => {
     const rParent = radiusAt(at);
-    const leaf = !(children.get(child.member.id) || []).length;
-    const rChild = leaf ? TIP_RADIUS * 1.35 : radiusAt(child);
-    const r0 = Math.min(rParent * 0.6, leaf ? 0.075 : rChild * 1.5);
-    const r1 = Math.min(rParent * 0.75, leaf ? 0.065 : rChild * 1.3);
-    const rMid = leaf ? 0.052 : rChild * 1.1;
-    const rEnd = leaf ? rChild : rChild * collarAt(child);
+    const rChild = radiusAt(child);
+    const r0 = Math.min(rParent * 0.6, rChild * 1.5);
+    const r1 = Math.min(rParent * 0.75, rChild * 1.3);
     const toChild = v3.norm(v3.sub(child.position, at.position));
     const lean = v3.norm(v3.add(v3.scale(tangent, 0.55), v3.scale(toChild, 0.45)));
     const collar = v3.add(v3.add(at.position, v3.scale(lean, rParent * 1.1)), [0, rParent * 0.1, 0]);
     const chain: LayoutChain = {
       id: child.member.id,
       kind: "branch",
-      points: [at.position, collar],
-      radii: [r0, r1],
-      gens: [child.member.generation - 0.9, child.member.generation - 0.75],
+      points: [at.position, collar, midArc(at, child), child.position],
+      radii: [r0, r1, rChild * 1.1, rChild * collarAt(child)],
+      gens: [child.member.generation - 0.9, child.member.generation - 0.75, child.member.generation - 0.5, child.member.generation],
       startInside: true,
     };
-    pushArc(chain, at, child, rMid, child.member.generation - 0.5);
-    chain.points.push(child.position);
-    chain.radii.push(rEnd);
-    chain.gens.push(child.member.generation);
     chains.push(chain);
     extend(chain, child, at.position);
   };
 
+  /** Chồi ngắn trên thân cho người không có con mà cha nằm trên thân chính */
+  const sprout = (at: LayoutNode, leaf: LayoutNode) => {
+    const out = v3.norm([leaf.position[0] - at.position[0], 0, leaf.position[2] - at.position[2]]);
+    const base = v3.add(v3.add(at.position, v3.scale(out, radiusAt(at) * 0.9)), [0, 0.12, 0]);
+    const d = v3.sub(leaf.position, base);
+    const mid = v3.add(v3.add(base, v3.scale(d, 0.55)), [0, v3.len(d) * 0.12, 0]);
+    chains.push({
+      id: `${leaf.member.id}__sprout`,
+      kind: "branch",
+      points: [at.position, base, mid, leaf.position],
+      radii: [0.08, 0.075, 0.055, TIP_RADIUS * 0.9],
+      gens: [leaf.member.generation - 0.9, leaf.member.generation - 0.7, leaf.member.generation - 0.4, leaf.member.generation],
+      startInside: true,
+    });
+  };
+
   let rootSpread = 0;
   if (mainRoot) {
-    const [rx, ry, rz] = mainRoot.position;
     const g0 = minGen - 1;
-    const H = ry - GROUND_Y;
-    // Thân hơi uốn chữ S, nghiêng nhẹ theo hướng ngẫu nhiên ổn định, loe mạnh ở gốc
-    const lean = hash01(mainRoot.member.id, 11) * Math.PI * 2;
-    const sway = (k: number): Vec3 => [Math.cos(lean) * k, 0, Math.sin(lean) * k];
+    const H = mainRoot.position[1] - GROUND_Y;
+    const at = (y: number): Vec3 => {
+      const [lx, lz] = leanAt(y);
+      return [lx, y, lz];
+    };
+    // Thân: rễ cái cắm xuống, gốc loe, thon dần lên, nghiêng nhẹ một hướng, đi tiếp qua các đời trên thân
     const trunk: LayoutChain = {
       id: "__trunk",
       kind: "trunk",
-      points: [
-        [0, GROUND_Y - 3.4, 0],
-        [0, GROUND_Y - 1.5, 0],
-        [0, GROUND_Y - 0.3, 0],
-        [0, GROUND_Y + 0.5, 0],
-        v3.add([0, GROUND_Y + H * 0.22, 0], sway(0.12)),
-        v3.add([0, GROUND_Y + H * 0.5, 0], sway(0.35)),
-        v3.add([rx * 0.4, GROUND_Y + H * 0.78, rz * 0.4], sway(0.18)),
-        [rx, ry, rz],
-      ],
-      radii: [0.18, trunkBase * 0.55, trunkBase * 1.0, trunkBase * 0.82, trunkTop * 1.22, trunkTop * 1.1, trunkTop * 1.03, trunkTop],
-      gens: [g0, g0, g0, g0, g0, g0, g0, mainRoot.member.generation],
+      points: [[0, GROUND_Y - 3.4, 0], [0, GROUND_Y - 1.5, 0], [0, GROUND_Y - 0.3, 0], at(GROUND_Y + 0.5), at(GROUND_Y + H * 0.35), at(GROUND_Y + H * 0.7), mainRoot.position],
+      radii: [0.18, trunkBase * 0.55, trunkBase * 1.0, trunkBase * 0.82, trunkTop * 1.2, trunkTop * 1.08, trunkTop],
+      gens: [g0, g0, g0, g0, g0, g0, mainRoot.member.generation],
       startInside: false,
     };
     chains.push(trunk);
@@ -436,8 +559,12 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     for (const r of roots) {
       if (r.id === mainRoot.member.id) continue;
       const n = byId.get(r.id)!;
-      const fake: LayoutNode = { ...mainRoot, position: [0, Math.min(n.position[1] - GEN_HEIGHT * 0.6, mainRoot.position[1]), 0] };
+      const fake: LayoutNode = { ...mainRoot, position: at(Math.min(n.position[1] - GEN_HEIGHT * 0.6, mainRoot.position[1])) };
       startSide(fake, n, [0, 1, 0]);
+    }
+    for (const n of leafNodes) {
+      const p = byId.get(parentOf(n.member)!);
+      if (p && isSpine(p)) sprout(p, n);
     }
     rootSpread = trunkBase * 1.5;
 
@@ -468,16 +595,18 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
       const laterals = 2 + Math.floor(hash01(id, 4) * 3);
       for (let k = 0; k < laterals; k++) {
         const lid = `${id}_${k}`;
-        const at = Math.min(main.pts.length - 2, 2 + Math.floor(((k + 0.5) / laterals) * (main.pts.length - 3)));
+        const atI = Math.min(main.pts.length - 2, 2 + Math.floor(((k + 0.5) / laterals) * (main.pts.length - 3)));
         const side = (k % 2 ? 1 : -1) * (0.55 + 0.5 * hash01(lid, 5));
-        const llen = len * (0.32 + 0.22 * hash01(lid, 6)) * (1 - at / main.pts.length * 0.5);
-        const lat = rootLine(lid, main.pts[at], az + side, llen, main.radii[at] * 0.55, llen * 0.35, 0.3, 6);
+        const llen = len * (0.32 + 0.22 * hash01(lid, 6)) * (1 - (atI / main.pts.length) * 0.5);
+        const lat = rootLine(lid, main.pts[atI], az + side, llen, main.radii[atI] * 0.55, llen * 0.35, 0.3, 6);
         const tip = lat.pts[Math.min(lat.pts.length - 2, 3)];
         rootLine(`${lid}_t`, tip, az + side * 1.6, llen * 0.45, lat.radii[3] * 0.6, llen * 0.25, 0.4, 4);
       }
     }
   }
 
+  let crownR = 1;
+  for (const r of spreadByGen.values()) crownR = Math.max(crownR, r);
   return {
     nodes,
     byId,
@@ -488,5 +617,6 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     spreadOf: (gen: number) => Math.max(gen === minGen ? trunkTop : 0.5, spreadByGen.get(gen) ?? 1),
     groundY: GROUND_Y,
     trunk: { baseRadius: trunkBase, topRadius: trunkTop, topY: mainRoot ? mainRoot.position[1] : 0, rootSpread },
+    crown: { height: CROWN_H, radius: crownR },
   };
 }
