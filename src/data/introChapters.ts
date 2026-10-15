@@ -92,7 +92,10 @@ export const INTRO_CHAPTERS: IntroChapter[] = [
     kicker: "Hôm nay",
     title: "Cành lá sum suê",
     body: (s) =>
-      `Từ một cội nguồn, dòng họ đã vươn thành ${s.generations} thế hệ với ${s.totalMembers} người con được ghi danh trong gia phả. Đời thứ ${s.maxGen} hiện có ${s.latestGenCount} người. ${s.alive} chiếc đèn lá xanh là những người đang sống hôm nay, và cây vẫn đang tiếp tục đâm chồi.`,
+      `Từ một cội nguồn, dòng họ đã vươn thành ${s.generations} thế hệ với ${s.totalMembers} người con được ghi danh trong gia phả. Đời thứ ${s.maxGen} hiện có ${s.latestGenCount} người. ` +
+      (s.alive > 0
+        ? `${s.alive} chiếc đèn lá xanh là những người đang sống hôm nay, và cây vẫn đang tiếp tục đâm chồi.`
+        : "Các đời gần đây đang được bổ sung dần vào gia phả, và cây vẫn đang tiếp tục đâm chồi."),
     focus: "latest",
     azimuth: 340,
     zoom: 1.1,
