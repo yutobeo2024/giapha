@@ -53,6 +53,24 @@ type FsDocument = Document & { webkitFullscreenElement?: Element | null; webkitE
 /** Phần tử tương tác: không bắt đầu kéo xoay từ đây */
 const isInteractive = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("button, a, input, .intro-explore-bar, .intro-member-card");
 
+/** Người xem đã tắt nhạc trong lần xem này (giữ tới khi đóng tab); lỗi lưu trữ thì coi như chưa tắt */
+const MUSIC_OFF_KEY = "intro-music-off";
+function musicOffThisVisit(): boolean {
+  try {
+    return sessionStorage.getItem(MUSIC_OFF_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function setMusicOffThisVisit(off: boolean) {
+  try {
+    if (off) sessionStorage.setItem(MUSIC_OFF_KEY, "1");
+    else sessionStorage.removeItem(MUSIC_OFF_KEY);
+  } catch {
+    /* chế độ riêng tư: bỏ qua */
+  }
+}
+
 const Intro: React.FC = () => {
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -340,7 +358,7 @@ const Intro: React.FC = () => {
     } catch {
       wakeLock.current = null;
     }
-    if (musicUrl && audioRef.current) {
+    if (musicUrl && audioRef.current && !musicOffThisVisit()) {
       audioRef.current.play().then(() => setMusicOn(true)).catch(() => setMusicOn(false));
     }
   };
@@ -407,12 +425,41 @@ const Intro: React.FC = () => {
     if (musicOn) {
       a.pause();
       setMusicOn(false);
+      setMusicOffThisVisit(true);
     } else {
+      setMusicOffThisVisit(false);
       a.play().then(() => setMusicOn(true)).catch(() => setMusicOn(false));
     }
   };
   useEffect(() => {
     if (!musicUrl) setMusicOn(false);
+  }, [musicUrl]);
+
+  // Vào trang là phát nhạc, trừ khi người xem đã tắt trong lần xem này. Trình duyệt chặn phát
+  // tiếng khi trang chưa được chạm (mở thẳng link): khi đó phát ở lần chạm/cuộn/bấm phím đầu tiên.
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!musicUrl || !a || musicOffThisVisit()) return;
+    let done = false;
+    const events = ["pointerdown", "keydown", "touchend", "wheel"] as const;
+    const detach = () => events.forEach((ev) => window.removeEventListener(ev, onGesture, true));
+    const start = () =>
+      a.play().then(
+        () => {
+          done = true;
+          setMusicOn(true);
+          detach();
+        },
+        () => setMusicOn(false)
+      );
+    function onGesture(e: Event) {
+      // Bấm thẳng vào nút nhạc thì để toggleMusic xử lý, tránh bật rồi tắt ngay
+      if ((e.target as Element | null)?.closest?.("[data-music-toggle]")) return detach();
+      if (!done && !musicOffThisVisit()) start();
+    }
+    events.forEach((ev) => window.addEventListener(ev, onGesture, true));
+    start();
+    return detach;
   }, [musicUrl]);
 
   // Đo khung chữ để camera đặt cây vào đúng phần màn hình còn trống (mọi thiết bị)
@@ -604,7 +651,7 @@ const Intro: React.FC = () => {
         } ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"} ${exploring && panel === "bottom" ? "hidden" : ""}`}
       >
         {musicUrl && (
-          <button onClick={toggleMusic} className="intro-icon-btn" aria-label={musicOn ? "Tắt nhạc" : "Bật nhạc"} title={musicOn ? "Tắt nhạc" : "Bật nhạc"}>
+          <button onClick={toggleMusic} data-music-toggle className="intro-icon-btn" aria-label={musicOn ? "Tắt nhạc" : "Bật nhạc"} title={musicOn ? "Tắt nhạc" : "Bật nhạc"}>
             {musicOn ? <Music2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
         )}
@@ -680,7 +727,7 @@ const Intro: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {musicUrl && <audio ref={audioRef} src={musicUrl} loop preload="none" onEnded={() => setMusicOn(false)} />}
+      {musicUrl && <audio ref={audioRef} src={musicUrl} loop preload="auto" onEnded={() => setMusicOn(false)} />}
     </div>
   );
 };
