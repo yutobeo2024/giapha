@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Search, X, ArrowLeft } from "lucide-react";
+import { Search, X, ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import type { FamilyMember } from "../../types";
 import { isAlive } from "../../types";
 
@@ -112,27 +112,74 @@ export default function ExploreBar({ members, minGen, maxGen, activeGen, onPickM
           )}
         </div>
       </div>
-      <div className="flex items-center gap-2 mt-2 min-w-0">
-        <div className="intro-chips">
-          {gens.map((g) => (
-            <button key={g} onClick={() => onPickGen(activeGen === g ? null : g)} className={`intro-chip ${activeGen === g ? "intro-chip-active" : ""}`}>
-              Đời {g}
-            </button>
-          ))}
-        </div>
-        {!compact && (
-          <div className="intro-legend shrink-0">
-            <span className="intro-dot" /> Tiền nhân
-            <span className="intro-dot intro-dot-alive ml-2" /> Đang sống
-          </div>
-        )}
+      <GenChips gens={gens} activeGen={activeGen} onPickGen={onPickGen} />
+      <div className="intro-legend mt-2">
+        <span className="intro-dot" /> Tiền nhân
+        <span className="intro-dot intro-dot-alive ml-2" /> Đang sống
+        {compact && <span className="ml-auto text-[#f5ead6]/50">Kéo xoay · Chụm phóng · Chạm xem</span>}
       </div>
-      {compact && (
-        <div className="intro-legend mt-2">
-          <span className="intro-dot" /> Tiền nhân
-          <span className="intro-dot intro-dot-alive ml-2" /> Đang sống
-          <span className="ml-auto text-[#f5ead6]/50">Kéo xoay · Chụm phóng · Chạm xem</span>
-        </div>
+    </div>
+  );
+}
+
+/**
+ * Hàng chip chọn đời cuộn ngang: có nút mũi tên hai bên khi còn chip bị khuất,
+ * lăn chuột dọc cũng cuộn ngang, chip đang chọn luôn được kéo vào khung nhìn.
+ */
+function GenChips({ gens, activeGen, onPickGen }: { gens: number[]; activeGen: number | null; onPickGen: (g: number | null) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edge, setEdge] = useState({ left: false, right: false });
+
+  const update = () => {
+    const el = ref.current;
+    if (!el) return;
+    setEdge({ left: el.scrollLeft > 4, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 4 });
+  };
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    update();
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || el.scrollWidth <= el.clientWidth) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      ro.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gens.length]);
+
+  useEffect(() => {
+    if (activeGen == null) return;
+    ref.current?.querySelector<HTMLElement>(`[data-gen="${activeGen}"]`)?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+  }, [activeGen]);
+
+  const page = (dir: number) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth * 0.8, behavior: "smooth" });
+
+  return (
+    <div className="intro-chips-wrap mt-2">
+      {edge.left && (
+        <button type="button" className="intro-chips-arrow intro-chips-arrow-left" onClick={() => page(-1)} aria-label="Các đời trước">
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+      )}
+      <div className="intro-chips" ref={ref} onScroll={update}>
+        {gens.map((g) => (
+          <button key={g} data-gen={g} onClick={() => onPickGen(activeGen === g ? null : g)} className={`intro-chip ${activeGen === g ? "intro-chip-active" : ""}`}>
+            Đời {g}
+          </button>
+        ))}
+      </div>
+      {edge.right && (
+        <button type="button" className="intro-chips-arrow intro-chips-arrow-right" onClick={() => page(1)} aria-label="Các đời sau">
+          <ChevronRight className="w-4 h-4" />
+        </button>
       )}
     </div>
   );
