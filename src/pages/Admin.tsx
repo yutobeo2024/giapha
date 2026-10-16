@@ -46,6 +46,9 @@ import { useAuthContext } from "../hooks/AuthContext";
 import { useMembers, fetchMembers, patchMembersCache, refreshMembersSnapshot } from "../hooks/useMembers";
 import PostsManager from "../components/admin/PostsManager";
 import Pager from "../components/admin/Pager";
+import EventDateField, { lunarDateError } from "../components/admin/EventDateField";
+import { describeOccurrence, displayOccurrence } from "../lib/eventDates";
+import { solarToLunar } from "../lib/lunar";
 import { foldText } from "../lib/text";
 import { uploadPhoto, uploadMedia } from "../lib/image";
 import { avatarUrl } from "../lib/avatar";
@@ -62,6 +65,27 @@ const PAGE_SIZE = 50;
 const inputCls =
   "w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20";
 const labelCls = "block text-xs font-bold uppercase text-[#A19D96] mb-2";
+
+/** Sự kiện mới: mặc định giỗ theo âm lịch, lặp hằng năm, hôm nay 8 giờ sáng */
+function newEventDefaults(): FormState {
+  const base = new Date(new Date().setHours(8, 0, 0, 0));
+  return { type: "Kỵ nhật", calendar: "lunar", lunar: solarToLunar(base), recurring: true, date: base.toISOString() };
+}
+
+/** Ô ngày trong bảng sự kiện: lần kế tiếp, lịch chính in đậm, lịch kia chú thích nhỏ */
+const EventDateCell: React.FC<{ event: FamilyEvent }> = ({ event }) => {
+  const occ = displayOccurrence(event);
+  const { primary, secondary } = describeOccurrence(event, occ, (d) => format(d, "d/M/yyyy"));
+  return (
+    <div className="min-w-[9rem]">
+      <div className="font-medium text-[#2D2A26]">
+        {format(occ, "HH:mm")}, {primary}
+      </div>
+      <div className="text-xs text-[#A19D96] italic">{secondary}</div>
+      {event.recurring && <div className="text-[10px] font-bold uppercase text-[#8B2323] mt-1">Hằng năm</div>}
+    </div>
+  );
+};
 
 const Admin: React.FC = () => {
   const { user, isEditor, isAdmin, isSuperAdmin, loading: authLoading, login } = useAuthContext();
@@ -234,7 +258,7 @@ const Admin: React.FC = () => {
         ? { ...item }
         : activeTab === "members"
           ? { gender: "Nam", generation: 1, status: "Alive" }
-          : { type: "Kỵ nhật" }
+          : newEventDefaults()
     );
     setImagePreview((item as FamilyMember | null)?.photoUrl || null);
     setIsModalOpen(true);
@@ -272,22 +296,34 @@ const Admin: React.FC = () => {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (uploading) return;
+    const col = activeTab === "members" ? "members" : "events";
+    const dateError = col === "events" && formData.calendar === "lunar" ? lunarDateError(formData.lunar) : null;
+    if (dateError) {
+      setMessage({ type: "error", text: dateError });
+      return;
+    }
     setLoading(true);
     setMessage(null);
 
-    const col = activeTab === "members" ? "members" : "events";
     const label = activeTab === "members" ? `thành viên: ${formData.name}` : `sự kiện: ${formData.title}`;
     // Không ghi trường id vào document (id đã là document id); loại bỏ key rỗng/undefined
     const { id: _ignored, ...rest } = formData as FormState & { id?: string };
+    if (col === "events") {
+      // Firestore không nhận giá trị undefined lồng bên trong; sự kiện dương lịch thì bỏ hẳn ngày âm
+      const l = rest.lunar;
+      rest.lunar =
+        rest.calendar === "lunar" && l ? { day: l.day, month: l.month, year: l.year, ...(l.leap ? { leap: true } : {}) } : undefined;
+      rest.recurring = !!rest.recurring;
+    }
     const payload = clean(rest);
 
     try {
       let savedId: string;
       if (editingItem) {
         savedId = editingItem.id;
-        // Thành viên: ghi đè cả document để ô bị xóa trắng trong biểu mẫu (ví dụ ngày mất) mất hẳn; updateDoc giữ lại trường cũ
-        if (col === "members") await setDoc(doc(db, col, savedId), payload);
-        else await updateDoc(doc(db, col, savedId), payload);
+        // Ghi đè cả document để ô bị xóa trắng trong biểu mẫu (ví dụ ngày mất, ngày âm khi đổi sang dương lịch)
+        // mất hẳn; updateDoc giữ lại trường cũ
+        await setDoc(doc(db, col, savedId), payload);
         await logActivity(`đã cập nhật ${label}`);
       } else {
         savedId = (await addDoc(collection(db, col), payload)).id;
@@ -736,7 +772,9 @@ const Admin: React.FC = () => {
                 events.map((event) => (
                   <tr key={event.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 font-bold text-[#2D2A26]">{event.title}</td>
-                    <td className="px-6 py-4 text-sm text-[#6B665F]">{format(new Date(event.date), "HH:mm, d/M/yyyy")}</td>
+                    <td className="px-6 py-4 text-sm text-[#6B665F]">
+                      <EventDateCell event={event} />
+                    </td>
                     <td className="px-6 py-4">
                       <span className="px-2 py-1 bg-[#FDFCF9] border border-[#E5E1D8] rounded text-[10px] font-bold uppercase text-[#8B2323]">
                         {event.type}
@@ -1101,23 +1139,21 @@ const Admin: React.FC = () => {
                             className={inputCls}
                           />
                         </div>
-                        <div>
-                          <label className={labelCls}>Thời gian</label>
-                          <input
-                            required
-                            type="datetime-local"
-                            value={formData.date ? format(new Date(formData.date), "yyyy-MM-dd'T'HH:mm") : ""}
-                            onChange={(e) =>
-                              setFormData({ ...formData, date: e.target.value ? new Date(e.target.value).toISOString() : "" })
-                            }
-                            className={inputCls}
-                          />
-                        </div>
+                        <EventDateField
+                          value={formData}
+                          onChange={(patch) => setFormData({ ...formData, ...patch })}
+                          inputCls={inputCls}
+                          labelCls={labelCls}
+                        />
                         <div>
                           <label className={labelCls}>Loại sự kiện</label>
                           <select
                             value={formData.type || "Kỵ nhật"}
-                            onChange={(e) => setFormData({ ...formData, type: e.target.value as FamilyEvent["type"] })}
+                            onChange={(e) => {
+                              const type = e.target.value as FamilyEvent["type"];
+                              // Giỗ thì mặc định lặp hằng năm
+                              setFormData({ ...formData, type, recurring: type === "Kỵ nhật" });
+                            }}
                             className={inputCls}
                           >
                             <option value="Kỵ nhật">Kỵ nhật</option>
