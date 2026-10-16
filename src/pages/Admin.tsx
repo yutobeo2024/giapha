@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   collection,
   addDoc,
   updateDoc,
   deleteDoc,
   doc,
+  getDoc,
   onSnapshot,
   query,
   orderBy,
@@ -36,13 +37,16 @@ import {
   Upload,
   Sparkles,
   Newspaper,
+  Search,
   type LucideIcon,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useSearchParams } from "react-router-dom";
 import { useAuthContext } from "../hooks/AuthContext";
-import { refreshMembersSnapshot } from "../hooks/useMembers";
+import { useMembers, fetchMembers, patchMembersCache, refreshMembersSnapshot } from "../hooks/useMembers";
 import PostsManager from "../components/admin/PostsManager";
+import Pager from "../components/admin/Pager";
+import { foldText } from "../lib/text";
 import { uploadPhoto, uploadMedia } from "../lib/image";
 import { avatarUrl } from "../lib/avatar";
 import { SEED_MEMBERS } from "../data/seedMembers";
@@ -51,6 +55,9 @@ import { ROLE_LABEL, STATUS_LABEL, type FamilyMember, type FamilyEvent, type Use
 type Tab = "members" | "events" | "users" | "posts" | "settings";
 type FormState = Partial<Omit<FamilyMember, "id">> & Partial<Omit<FamilyEvent, "id">>;
 type Message = { type: "success" | "error"; text: string };
+
+/** Số thành viên mỗi trang bảng (hơn 1.500 người, hiện hết một lúc rất nặng) */
+const PAGE_SIZE = 50;
 
 const inputCls =
   "w-full px-4 py-3 bg-[#FDFCF9] border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20";
@@ -62,7 +69,13 @@ const Admin: React.FC = () => {
   const [searchParams] = useSearchParams();
   // /admin?tab=posts&edit=<id>: mở thẳng tab Bài viết (từ trang Thông tin)
   const [activeTab, setActiveTab] = useState<Tab>(() => (searchParams.get("tab") === "posts" ? "posts" : "members"));
-  const [members, setMembers] = useState<FamilyMember[]>([]);
+  // Danh sách thành viên lấy từ bản chụp /api/members như các trang công khai (không đọc cả collection Firestore)
+  const { members, loading: membersLoading } = useMembers();
+  const [memberSearch, setMemberSearch] = useState("");
+  const [memberGen, setMemberGen] = useState<number | "all">("all");
+  const [pageNo, setPageNo] = useState(1);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const [events, setEvents] = useState<FamilyEvent[]>([]);
   const [users, setUsers] = useState<UserDoc[]>([]);
   const [userFilter, setUserFilter] = useState<"all" | "pending">("all");
@@ -82,21 +95,13 @@ const Admin: React.FC = () => {
   // ---------- Subscriptions ----------
   useEffect(() => {
     if (!user || !isEditor) return;
-
-    const unsubMembers = onSnapshot(
-      query(collection(db, "members"), orderBy("generation", "asc"), orderBy("name", "asc")),
-      (snap) => setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as FamilyMember)),
-      (err) => setMessage({ type: "error", text: handleFirestoreError(err, OperationType.LIST, "members") })
-    );
-    const unsubEvents = onSnapshot(
+    // Mở trang Quản trị: lấy bản mới nhất từ máy chủ (bản giữ trong phiên có thể thiếu sửa đổi của người khác)
+    void fetchMembers(true);
+    return onSnapshot(
       query(collection(db, "events"), orderBy("date", "desc")),
       (snap) => setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as FamilyEvent)),
       (err) => setMessage({ type: "error", text: handleFirestoreError(err, OperationType.LIST, "events") })
     );
-    return () => {
-      unsubMembers();
-      unsubEvents();
-    };
   }, [user, isEditor]);
 
   useEffect(() => {
@@ -132,6 +137,27 @@ const Admin: React.FC = () => {
     // Chờ duyệt lên đầu, trong mỗi nhóm giữ thứ tự createdAt desc
     return [...list].sort((a, b) => Number(b.role === "user") - Number(a.role === "user"));
   }, [users, userFilter]);
+
+  // Bảng thành viên: lọc theo tên/chi (không cần dấu) và đời, rồi chia trang
+  useEffect(() => setPageNo(1), [memberSearch, memberGen]);
+  const generations = useMemo(() => Array.from(new Set(members.map((m) => m.generation))).sort((a, b) => a - b), [members]);
+  const filteredMembers = useMemo(() => {
+    const q = foldText(memberSearch.trim());
+    return members.filter(
+      (m) => (memberGen === "all" || m.generation === memberGen) && (!q || foldText(m.name).includes(q) || foldText(m.branch || "").includes(q))
+    );
+  }, [members, memberSearch, memberGen]);
+  const pageCount = Math.max(1, Math.ceil(filteredMembers.length / PAGE_SIZE));
+  const memberPage = Math.min(pageNo, pageCount);
+  const pageMembers = useMemo(
+    () => filteredMembers.slice((memberPage - 1) * PAGE_SIZE, memberPage * PAGE_SIZE),
+    [filteredMembers, memberPage]
+  );
+  const goToPage = (p: number) => {
+    setPageNo(p);
+    const top = toolbarRef.current?.getBoundingClientRect().top ?? 0;
+    window.scrollTo({ top: window.scrollY + top - 96, behavior: "smooth" });
+  };
 
   // ---------- Guards ----------
   if (authLoading) {
@@ -180,6 +206,23 @@ const Admin: React.FC = () => {
     }
   };
 
+  /** Đẩy thay đổi lên bản chụp mà các trang công khai đang dùng; không được thì báo để biết trang ngoài còn hiện bản cũ. */
+  const syncSnapshot = async (id?: string) => {
+    if (!(await refreshMembersSnapshot(user, id)))
+      setMessage({
+        type: "error",
+        text: "Đã lưu, nhưng chưa cập nhật được danh sách công khai; các trang ngoài sẽ tự cập nhật trong vòng 6 giờ.",
+      });
+  };
+
+  // Cha mẹ luôn ở đời liền trước: chỉ liệt kê đời đó (hơn 1.500 người thì danh sách đủ các đời không chọn nổi);
+  // người đang được chọn vẫn giữ dù khác đời
+  const parentOptions = (gender: FamilyMember["gender"], current?: string) => {
+    const gen = (formData.generation || 1) - 1;
+    return members.filter((m) => m.gender === gender && m.id !== editingItem?.id && (m.generation === gen || m.id === current));
+  };
+  const parentGenLabel = (formData.generation || 1) > 1 ? ` (đời ${(formData.generation || 1) - 1})` : "";
+
   /** Firestore không nhận undefined: loại bỏ các key undefined/"" trước khi ghi. */
   const clean = <T extends object>(obj: T): T =>
     Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined && v !== "")) as T;
@@ -195,6 +238,27 @@ const Admin: React.FC = () => {
     );
     setImagePreview((item as FamilyMember | null)?.photoUrl || null);
     setIsModalOpen(true);
+  };
+
+  // Bảng là bản chụp (có thể chậm vài phút): biểu mẫu sửa lấy bản mới nhất từ Firestore (1 lượt đọc)
+  // để không ghi đè thay đổi của người khác bằng dữ liệu cũ
+  const openMemberEditor = async (member: FamilyMember) => {
+    setOpeningId(member.id);
+    try {
+      const snap = await getDoc(doc(db, "members", member.id));
+      if (!snap.exists()) {
+        patchMembersCache(member.id, null);
+        setMessage({ type: "error", text: `"${member.name}" không còn trong hệ thống (có thể đã bị xóa).` });
+        return;
+      }
+      const live = { id: snap.id, ...snap.data() } as FamilyMember;
+      patchMembersCache(live.id, live);
+      openModal(live);
+    } catch (err) {
+      setMessage({ type: "error", text: handleFirestoreError(err, OperationType.GET, "members") });
+    } finally {
+      setOpeningId(null);
+    }
   };
 
   const closeModal = () => {
@@ -218,16 +282,23 @@ const Admin: React.FC = () => {
     const payload = clean(rest);
 
     try {
+      let savedId: string;
       if (editingItem) {
-        await updateDoc(doc(db, col, editingItem.id), payload);
+        savedId = editingItem.id;
+        // Thành viên: ghi đè cả document để ô bị xóa trắng trong biểu mẫu (ví dụ ngày mất) mất hẳn; updateDoc giữ lại trường cũ
+        if (col === "members") await setDoc(doc(db, col, savedId), payload);
+        else await updateDoc(doc(db, col, savedId), payload);
         await logActivity(`đã cập nhật ${label}`);
       } else {
-        await addDoc(collection(db, col), payload);
+        savedId = (await addDoc(collection(db, col), payload)).id;
         await logActivity(`đã thêm mới ${label}`);
       }
       setMessage({ type: "success", text: "Lưu thành công!" });
       closeModal();
-      if (col === "members") void refreshMembersSnapshot(user);
+      if (col === "members") {
+        patchMembersCache(savedId, { id: savedId, ...payload } as FamilyMember);
+        void syncSnapshot(savedId);
+      }
     } catch (err) {
       setMessage({
         type: "error",
@@ -247,7 +318,10 @@ const Admin: React.FC = () => {
       await logActivity(`đã xóa ${activeTab === "members" ? "thành viên" : "sự kiện"}: ${name}`);
       setMessage({ type: "success", text: "Xóa thành công!" });
       setItemToDelete(null);
-      if (activeTab === "members") void refreshMembersSnapshot(user);
+      if (activeTab === "members") {
+        patchMembersCache(id, null);
+        void syncSnapshot(id);
+      }
     } catch (err) {
       setMessage({ type: "error", text: handleFirestoreError(err, OperationType.DELETE, activeTab) });
     } finally {
@@ -313,7 +387,7 @@ const Admin: React.FC = () => {
       await batch.commit();
       await logActivity(`đã nạp dữ liệu gốc (${SEED_MEMBERS.length} thành viên, 12 đời)`);
       setMessage({ type: "success", text: `Đã nạp ${SEED_MEMBERS.length} thành viên.` });
-      void refreshMembersSnapshot(user);
+      void syncSnapshot();
     } catch (err) {
       setMessage({ type: "error", text: handleFirestoreError(err, OperationType.WRITE, "members") });
     } finally {
@@ -380,7 +454,7 @@ const Admin: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {/* Chỉ dùng khi dựng site lần đầu: dữ liệu gốc cũ (đời 1-12) khác bản đã sửa theo kỷ yếu */}
-          {activeTab === "members" && isAdmin && members.length === 0 && (
+          {activeTab === "members" && isAdmin && !membersLoading && members.length === 0 && (
             <button
               onClick={() => setShowSeedConfirm(true)}
               disabled={loading}
@@ -540,6 +614,36 @@ const Admin: React.FC = () => {
         </div>
       )}
 
+      {/* Thành viên: tìm và lọc đời */}
+      {activeTab === "members" && (
+        <div ref={toolbarRef} className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-grow">
+            <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-[#A19D96] pointer-events-none" />
+            <input
+              type="search"
+              value={memberSearch}
+              onChange={(e) => setMemberSearch(e.target.value)}
+              placeholder="Tìm theo tên hoặc chi (không cần dấu)…"
+              aria-label="Tìm thành viên"
+              className="w-full pl-11 pr-4 py-3 bg-white border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
+            />
+          </div>
+          <select
+            value={memberGen}
+            onChange={(e) => setMemberGen(e.target.value === "all" ? "all" : Number(e.target.value))}
+            aria-label="Lọc theo đời"
+            className="px-4 py-3 bg-white border border-[#E5E1D8] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8B2323]/20"
+          >
+            <option value="all">Tất cả các đời</option>
+            {generations.map((g) => (
+              <option key={g} value={g}>
+                Đời {g}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Table */}
       {activeTab !== "settings" && activeTab !== "posts" && (
       <div className="bg-white rounded-3xl border border-[#E5E1D8] overflow-hidden shadow-sm">
@@ -573,7 +677,7 @@ const Admin: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-[#E5E1D8]">
               {activeTab === "members" &&
-                members.map((member) => (
+                pageMembers.map((member) => (
                   <tr key={member.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -607,8 +711,9 @@ const Admin: React.FC = () => {
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => openModal(member)}
-                          className="p-2 text-[#6B665F] hover:text-[#8B2323] hover:bg-[#8B2323]/5 rounded-lg transition-all"
+                          onClick={() => void openMemberEditor(member)}
+                          disabled={openingId !== null}
+                          className="p-2 text-[#6B665F] hover:text-[#8B2323] hover:bg-[#8B2323]/5 rounded-lg transition-all disabled:opacity-40"
                           title="Sửa"
                         >
                           <Edit2 className="w-4 h-4" />
@@ -760,18 +865,23 @@ const Admin: React.FC = () => {
                   );
                 })}
 
-              {((activeTab === "members" && members.length === 0) ||
+              {((activeTab === "members" && pageMembers.length === 0) ||
                 (activeTab === "events" && events.length === 0) ||
                 (activeTab === "users" && visibleUsers.length === 0)) && (
                 <tr>
                   <td colSpan={5} className="px-6 py-12 text-center text-sm text-[#A19D96]">
-                    Chưa có dữ liệu.
+                    {activeTab === "members" && membersLoading
+                      ? "Đang tải danh sách…"
+                      : activeTab === "members" && members.length > 0
+                        ? "Không có thành viên nào khớp."
+                        : "Chưa có dữ liệu."}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+        {activeTab === "members" && <Pager page={memberPage} pageSize={PAGE_SIZE} total={filteredMembers.length} onChange={goToPage} />}
       </div>
       )}
 
@@ -945,15 +1055,14 @@ const Admin: React.FC = () => {
                           <h3 className="text-sm font-bold text-[#8B2323] mb-4">Mối quan hệ gia đình</h3>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
-                              <label className={labelCls}>Cha</label>
+                              <label className={labelCls}>Cha{parentGenLabel}</label>
                               <select
                                 value={formData.fatherId || ""}
                                 onChange={(e) => setFormData({ ...formData, fatherId: e.target.value })}
                                 className={inputCls}
                               >
                                 <option value="">Không có / Chưa rõ</option>
-                                {members
-                                  .filter((m) => m.id !== editingItem?.id && m.gender === "Nam")
+                                {parentOptions("Nam", formData.fatherId)
                                   .map((m) => (
                                     <option key={m.id} value={m.id}>
                                       {m.name} (Thế hệ {m.generation})
@@ -962,15 +1071,14 @@ const Admin: React.FC = () => {
                               </select>
                             </div>
                             <div>
-                              <label className={labelCls}>Mẹ</label>
+                              <label className={labelCls}>Mẹ{parentGenLabel}</label>
                               <select
                                 value={formData.motherId || ""}
                                 onChange={(e) => setFormData({ ...formData, motherId: e.target.value })}
                                 className={inputCls}
                               >
                                 <option value="">Không có / Chưa rõ</option>
-                                {members
-                                  .filter((m) => m.id !== editingItem?.id && m.gender === "Nữ")
+                                {parentOptions("Nữ", formData.motherId)
                                   .map((m) => (
                                     <option key={m.id} value={m.id}>
                                       {m.name} (Thế hệ {m.generation})
