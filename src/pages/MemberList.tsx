@@ -11,7 +11,8 @@ import {
   Heart,
   UserPlus,
   ArrowRight,
-  Info
+  Info,
+  Landmark
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { STATUS_LABEL, type FamilyMember as Member } from "../types";
@@ -183,12 +184,11 @@ const MemberList: React.FC = () => {
                       </p>
                     </div>
                   </div>
-                  <div className="mt-4 flex items-center justify-between pt-4 border-t border-[#E5E1D8]/50">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-[#FDFCF9] border border-[#E5E1D8] flex items-center justify-center text-[10px] font-bold text-[#8B2323]">
-                        {member.branch || "I"}
-                      </div>
-                      <span className="text-[10px] font-bold text-[#6B665F]">Chi tộc</span>
+                  <div className="mt-4 flex items-center justify-between gap-3 pt-4 border-t border-[#E5E1D8]/50">
+                    {/* Chi tộc là chuỗi dài ("Chi ông Vinh (ông Nhuận Sĩ) - Phúc Thành"), không nhét vào ô tròn */}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Landmark className="w-3.5 h-3.5 text-[#8B2323] shrink-0" />
+                      <span className="text-[10px] font-bold text-[#6B665F] truncate">{member.branch || "Chưa ghi chi tộc"}</span>
                     </div>
                     <button className="text-[10px] font-bold text-[#8B2323] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       Hồ sơ <ChevronRight className="w-3 h-3" />
