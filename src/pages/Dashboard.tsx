@@ -69,7 +69,7 @@ const Dashboard: React.FC = () => {
     // Lấy hết sự kiện (chỉ vài chục mục) rồi tự tính lần kế tiếp ở trên
     const qEvents = query(collection(db, "events"), orderBy("date", "asc"));
     const unsubEvents = onSnapshot(qEvents, (snapshot) => {
-      setEvents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FamilyEvent)));
+      setEvents(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as FamilyEvent)));
     }, (err) => setError(handleFirestoreError(err, OperationType.LIST, "events")));
 
     fetchStats();

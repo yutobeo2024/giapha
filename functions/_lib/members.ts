@@ -29,9 +29,10 @@ type FirestoreDoc = { name: string; fields?: Record<string, FirestoreValue> };
 type Member = { id: string | undefined } & Record<string, unknown>;
 type Snapshot = { builtAt: string; members: Member[] };
 
+// id của document đứng sau cùng: trường `id` lỡ có trong dữ liệu không được che mất id thật
 const decodeDoc = (d: FirestoreDoc): Member => ({
-  id: d.name.split("/").pop(),
   ...Object.fromEntries(Object.entries(d.fields || {}).map(([k, v]) => [k, decode(v)])),
+  id: d.name.split("/").pop(),
 });
 
 const documentsUrl = (env: Env) =>

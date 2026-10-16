@@ -82,7 +82,7 @@ const PostsManager: React.FC<Props> = ({ user, initialEditId, setMessage, logAct
     () =>
       onSnapshot(
         collection(db, "posts"),
-        (snap) => setPosts(sortPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Post))),
+        (snap) => setPosts(sortPosts(snap.docs.map((d) => ({ ...d.data(), id: d.id }) as Post))),
         (err) => setMessage({ type: "error", text: handleFirestoreError(err, OperationType.LIST, "posts") })
       ),
     [setMessage]

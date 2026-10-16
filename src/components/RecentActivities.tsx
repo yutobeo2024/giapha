@@ -42,7 +42,7 @@ const RecentActivities: React.FC<{ onError: (msg: string) => void }> = ({ onErro
     const apply = (snap: QuerySnapshot) => {
       const docs = snap.docs.slice(0, PAGE_SIZE);
       if (docs.length) cursors.current[page] = docs[docs.length - 1];
-      setItems(docs.map((d) => ({ id: d.id, ...d.data() }) as ActivityLog));
+      setItems(docs.map((d) => ({ ...d.data(), id: d.id }) as ActivityLog));
       setHasMore(snap.docs.length > PAGE_SIZE);
       setLoading(false);
     };

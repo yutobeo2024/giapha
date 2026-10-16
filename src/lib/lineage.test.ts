@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { FamilyMember } from "../types";
-import { indexMembers, parentLabel, countDescendants, derivedGeneration, lineageError } from "./lineage.ts";
+import { indexMembers, parentLabel, countDescendants, derivedGeneration, lineageError, treeParents } from "./lineage.ts";
+import { computeTreeLayout } from "./treeLayout3d.ts";
 
 const M = (id: string, generation: number, fatherId?: string, extra: Partial<FamilyMember> = {}): FamilyMember => ({
   id,
@@ -71,4 +72,34 @@ test("chặn: đổi đời của người đã có con cháu; người chưa c�
 test("sửa người cũ mà giữ nguyên đời và cha thì hợp lệ", () => {
   const b = byId.get("B")!;
   assert.equal(lineageError({ generation: 3, fatherId: "A" }, b, index), null);
+});
+
+
+test("treeParents: cha trước, không có cha thì mẹ; cha đã bị xóa thì thành gốc", () => {
+  const p = treeParents([M("A", 1), M("B", 2, "A"), M("C", 3, undefined, { motherId: "B" }), M("D", 5, "da-xoa")]);
+  assert.equal(p.get("A"), undefined);
+  assert.equal(p.get("B"), "A");
+  assert.equal(p.get("C"), "B");
+  assert.equal(p.get("D"), undefined);
+});
+
+test("treeParents: dữ liệu lỗi có vòng lặp được cắt ở người đời thấp nhất, không ai mất", () => {
+  // X ↔ Y nối dưới gốc R qua Z (Z là con Y): vòng X-Y không có đường lên R
+  const list = [M("R", 1), M("X", 4, "Y"), M("Y", 5, "X"), M("Z", 6, "Y"), M("S", 2, "S")];
+  const p = treeParents(list);
+  assert.equal(p.get("X"), undefined, "X đời 4 thấp hơn Y nên thành gốc");
+  assert.equal(p.get("Y"), "X");
+  assert.equal(p.get("Z"), "Y");
+  assert.equal(p.get("S"), undefined, "tự làm cha mình");
+  // Đi ngược từ bất kỳ ai cũng phải dừng
+  for (const m of list) {
+    let steps = 0;
+    for (let cur = p.get(m.id); cur; cur = p.get(cur)) assert.ok(++steps < list.length, `vòng lặp từ ${m.id}`);
+  }
+});
+
+test("cây 3D: người trong vòng lặp hoặc tự làm cha mình vẫn có mặt", () => {
+  const list = [M("R", 1), M("A", 2, "B"), M("B", 3, "A"), M("S", 2, "S"), M("K", 2, "R")];
+  const layout = computeTreeLayout(list);
+  assert.equal(layout.nodes.length, list.length);
 });

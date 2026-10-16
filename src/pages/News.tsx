@@ -57,7 +57,7 @@ const News: React.FC = () => {
     return onSnapshot(
       q,
       (snap) => {
-        setPosts(sortPosts(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Post)));
+        setPosts(sortPosts(snap.docs.map((d) => ({ ...d.data(), id: d.id }) as Post)));
         setLoading(false);
       },
       (err) => {

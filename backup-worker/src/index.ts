@@ -71,9 +71,10 @@ export async function readCollection(env: Env, collectionId: string) {
     .filter((r) => r.document)
     .map((r) => {
       const d = r.document!;
+      // id của document đứng sau dữ liệu: trường `id` lỡ có trong dữ liệu không được che mất id thật
       return {
-        id: d.name.split("/").pop(),
         ...Object.fromEntries(Object.entries(d.fields || {}).map(([k, v]) => [k, decode(v)])),
+        id: d.name.split("/").pop(),
         __createTime: d.createTime,
         __updateTime: d.updateTime,
       };

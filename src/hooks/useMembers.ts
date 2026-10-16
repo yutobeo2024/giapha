@@ -27,7 +27,7 @@ async function load(fresh: boolean): Promise<FamilyMember[]> {
   } catch (e) {
     console.warn("Không lấy được /api/members, đọc thẳng Firestore:", e);
     const snap = await getDocs(collection(db, "members"));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as FamilyMember).sort(byGenThenName);
+    return snap.docs.map((d) => ({ ...d.data(), id: d.id }) as FamilyMember).sort(byGenThenName);
   }
 }
 

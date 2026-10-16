@@ -46,17 +46,20 @@ export async function authenticate(request: Request, env: Env): Promise<Caller> 
 
   let uid: string;
   let email: string | null;
+  let emailVerified: boolean;
   try {
     const auth = Auth.getOrInitialize(env.FIREBASE_PROJECT_ID, keyStore);
     const decoded = await auth.verifyIdToken(idToken);
     uid = decoded.uid;
     email = decoded.email ?? null;
+    emailVerified = decoded.email_verified === true;
   } catch (e) {
     console.warn("verifyIdToken failed:", e instanceof Error ? e.message : e);
     throw new AuthError(401, "Token không hợp lệ hoặc đã hết hạn.");
   }
 
-  const isSuperAdmin = !!email && email.toLowerCase() === env.SUPER_ADMIN_EMAIL.toLowerCase();
+  // Chỉ email đã xác minh mới là super admin (Google luôn xác minh; phòng khi bật thêm cách đăng nhập khác)
+  const isSuperAdmin = emailVerified && !!email && email.toLowerCase() === env.SUPER_ADMIN_EMAIL.toLowerCase();
 
   // Đọc users/{uid} bằng chính token của người dùng (rules cho phép chính chủ đọc).
   const url =

@@ -26,7 +26,7 @@ Trang gia phả họ Nguyễn Nhuận: hành trình dòng họ dạng 3D, danh s
 | `editor` | admin duyệt trong tab **Người dùng** | thêm/sửa thành viên và sự kiện, tải ảnh |
 | `admin` | super admin nâng quyền | tất cả, cộng: xóa dữ liệu, bài viết, cài đặt, duyệt/khóa người dùng |
 
-Super admin là email cố định `hanhtoami@gmail.com`, khai báo ở **3 nơi phải giống nhau**: `src/config.ts`, `firestore.rules`, biến `SUPER_ADMIN_EMAIL` trong `wrangler.toml`.
+Super admin là email cố định `hanhtoami@gmail.com`, khai báo ở **3 nơi phải giống nhau**: `src/config.ts`, `firestore.rules`, biến `SUPER_ADMIN_EMAIL` trong `wrangler.toml`. Cả ba nơi chỉ công nhận khi email **đã xác minh** (`email_verified`); đăng nhập Google luôn đạt điều kiện này.
 
 ## Dữ liệu và quy ước
 
@@ -46,6 +46,7 @@ Luật đầy đủ và kiểm tra kiểu dữ liệu nằm ở `firestore.rules
 ### Đời và cha mẹ
 - **Thủy tổ Nguyễn Hữu Chỉ là đời 1**, đời con = đời cha + 1 (cùng cách đếm với Kỷ yếu Nguyễn Hữu Tộc 2023). Bài phát biểu của Hội đồng Gia tộc đếm Tiên tổ Nguyễn Dũng Cảm là đời 1: muốn đổi sang cách đếm trên trang thì **cộng 3**.
 - Biểu mẫu Quản trị không cho nhập đời tùy ý: chọn cha (hoặc mẹ) bằng ô gõ tên thì ô Đời tự tính và khóa; chỉ khi chưa rõ cha mẹ mới chọn tay. Khi lưu, web chặn nếu đời ≠ đời cha + 1, nếu chọn chính mình hoặc con cháu mình làm cha mẹ, hoặc nếu đổi đời của người đã có con cháu. Quy tắc nằm ở `src/lib/lineage.ts`.
+- Sơ đồ cây và cây 3D lấy người đứng trên qua `treeParents()`: cha, không có thì mẹ. Người có cha đã bị xóa thành gốc riêng (không mất khỏi sơ đồ). Dữ liệu lỗi có vòng lặp cha–con thì cắt ở người đời thấp nhất trong vòng.
 - Nhiều người trùng tên (ví dụ 14 bà Nguyễn Thị Huyền) là người khác nhau. Mọi ô tìm kiếm ghi "con ông …" để phân biệt.
 
 ### Chi tộc
@@ -72,7 +73,7 @@ Mỗi thành viên tính một lượt đọc, nên các trang công khai **khô
 ```bash
 npm install
 npm run dev       # http://localhost:5173: chỉ front-end, đọc Firestore thật, không tải ảnh được
-npm test          # node --test src/lib/*.test.ts (âm lịch, lần diễn ra sự kiện, dàn trang PDF, phả hệ)
+npm test          # node --test src/lib/*.test.ts test/*.test.ts (âm lịch, sự kiện, .ics, dàn trang PDF, phả hệ; Functions và Worker sao lưu với mạng giả lập)
 npm run lint      # tsc cho src/, functions/ và backup-worker/
 npm run build     # ra dist/
 npm run preview   # wrangler pages dev dist → http://localhost:8788, có Functions + R2 giả lập
@@ -124,6 +125,7 @@ scripts/
   restore-backup.mjs         khôi phục từ file sao lưu
   import-posts.mjs           nạp một đợt bài viết trong content/posts/<đợt>/
   fill-branch.mjs            chuyển chi tộc từ tiểu sử sang ô Chi tộc (đã chạy 16/10/2026)
+test/                        test cho functions/ và backup-worker/ (không để trong functions/ vì Pages coi file ở đó là route)
 content/posts/<đợt>/         bài viết soạn sẵn: posts.json, images/, README.md để duyệt
 public/fonts/                Be Vietnam Pro (OFL) cho bản PDF
 firestore.rules, firestore.indexes.json, firebase.json
