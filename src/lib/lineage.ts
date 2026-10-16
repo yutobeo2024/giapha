@@ -46,6 +46,44 @@ export function descendantIds(id: string, childrenOf: Map<string, FamilyMember[]
 
 export const countDescendants = (id: string, childrenOf: Map<string, FamilyMember[]>): number => descendantIds(id, childrenOf).size;
 
+/**
+ * Người đứng trên mỗi người khi vẽ cây: cha nếu có trong danh sách, không thì mẹ.
+ * Dữ liệu lỗi có vòng lặp (A là cha B, B là cha A, hoặc tự làm cha mình) thì cắt vòng ở người đời thấp nhất
+ * trong vòng, người đó thành gốc riêng; nhờ vậy không ai biến mất khỏi cây và các vòng duyệt không treo.
+ */
+export function treeParents(members: FamilyMember[]): Map<string, string | undefined> {
+  const byId = new Map(members.map((m) => [m.id, m]));
+  const parent = new Map<string, string | undefined>();
+  for (const m of members) {
+    parent.set(
+      m.id,
+      (m.fatherId && byId.has(m.fatherId) ? m.fatherId : undefined) ?? (m.motherId && byId.has(m.motherId) ? m.motherId : undefined)
+    );
+  }
+  const done = new Set<string>();
+  for (const m of members) {
+    const path: string[] = [];
+    const onPath = new Set<string>();
+    let cur: string | undefined = m.id;
+    while (cur && !done.has(cur) && !onPath.has(cur)) {
+      path.push(cur);
+      onPath.add(cur);
+      cur = parent.get(cur);
+    }
+    if (cur && onPath.has(cur)) {
+      const cycle = path.slice(path.indexOf(cur));
+      const cut = cycle.reduce((a, b) => {
+        const ga = byId.get(a)!.generation;
+        const gb = byId.get(b)!.generation;
+        return gb < ga || (gb === ga && b < a) ? b : a;
+      });
+      parent.set(cut, undefined);
+    }
+    path.forEach((id) => done.add(id));
+  }
+  return parent;
+}
+
 /** Đời suy ra từ cha (không có cha thì từ mẹ); không rõ cả hai thì null, phải chọn tay */
 export function derivedGeneration(form: Pick<FamilyMember, "fatherId" | "motherId">, byId: Map<string, FamilyMember>): number | null {
   const father = form.fatherId ? byId.get(form.fatherId) : undefined;

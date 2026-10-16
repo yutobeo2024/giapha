@@ -1,4 +1,5 @@
 import type { FamilyMember } from "../types";
+import { treeParents } from "./lineage.ts";
 
 /** Một điểm 3D đơn giản, không phụ thuộc three.js để hàm bố cục chạy được ở mọi nơi. */
 export type Vec3 = [number, number, number];
@@ -123,11 +124,9 @@ function basis(d: Vec3): [Vec3, Vec3] {
  * - Người không có con không thành cành riêng mà treo thành chùm ở đầu cành của cha, như chùm lá.
  */
 export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
-  const byIdMember = new Map(members.map((m) => [m.id, m]));
   const children = new Map<string, FamilyMember[]>();
-  const parentOf = (m: FamilyMember) =>
-    (m.fatherId && byIdMember.has(m.fatherId) ? m.fatherId : undefined) ??
-    (m.motherId && byIdMember.has(m.motherId) ? m.motherId : undefined);
+  const parents = treeParents(members);
+  const parentOf = (m: FamilyMember) => parents.get(m.id);
 
   for (const m of members) {
     const p = parentOf(m);

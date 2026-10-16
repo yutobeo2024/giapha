@@ -1,9 +1,13 @@
 import type { FamilyEvent } from "../types";
 import { formatLunar, lunarMonthLength, lunarToSolar, solarToLunar } from "./lunar.ts";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 export const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+/**
+ * Nửa đêm (giờ máy) của ngày lịch cách `d` n ngày. Không cộng n × 24 giờ: ngày đổi giờ mùa hè
+ * chỉ dài 23 hoặc 25 giờ, cộng 24 giờ sẽ lấn sang ngày kế tiếp hoặc hụt mất một giờ.
+ */
+export const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 
 const withTime = (day: Date, time: Date) =>
   new Date(day.getFullYear(), day.getMonth(), day.getDate(), time.getHours(), time.getMinutes());
@@ -49,7 +53,7 @@ export function occurrencesBetween(e: FamilyEvent, from: Date, to: Date): Date[]
 /** Có diễn ra vào ngày (theo giờ máy) chứa `day` không */
 export const occursOn = (e: FamilyEvent, day: Date) => {
   const from = startOfDay(day);
-  return occurrencesBetween(e, from, new Date(from.getTime() + DAY_MS)).length > 0;
+  return occurrencesBetween(e, from, addDays(from, 1)).length > 0;
 };
 
 /** Lần diễn ra kế tiếp kể từ đầu ngày hôm nay; null nếu sự kiện một lần đã qua */

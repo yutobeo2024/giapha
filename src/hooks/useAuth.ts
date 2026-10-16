@@ -60,7 +60,7 @@ export function useAuth(): AuthState {
       try {
         const snap = await getDoc(userRef);
         if (!snap.exists()) {
-          const defaultRole: UserRole = isSuperAdminEmail(currentUser.email) ? "admin" : "user";
+          const defaultRole: UserRole = currentUser.emailVerified && isSuperAdminEmail(currentUser.email) ? "admin" : "user";
           await setDoc(userRef, {
             email: currentUser.email,
             displayName: currentUser.displayName,
@@ -127,7 +127,8 @@ export function useAuth(): AuthState {
     }
   }, []);
 
-  const isSuperAdmin = isSuperAdminEmail(user?.email);
+  // Giống firestore.rules: email super admin phải đã xác minh
+  const isSuperAdmin = !!user?.emailVerified && isSuperAdminEmail(user.email);
   const isAdmin = !!user && (role === "admin" || isSuperAdmin);
   const isEditor = !!user && (role === "editor" || isAdmin);
 

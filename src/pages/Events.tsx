@@ -9,13 +9,12 @@ import { format } from "date-fns";
 import { vi } from "date-fns/locale";
 import type { FamilyEvent } from "../types";
 import { downloadIcs } from "../lib/ics";
-import { describeOccurrence, isLunarEvent, lunarNote, nextOccurrence, occurrencesBetween, startOfDay } from "../lib/eventDates";
+import { addDays, describeOccurrence, isLunarEvent, lunarNote, nextOccurrence, occurrencesBetween, startOfDay } from "../lib/eventDates";
 import { solarToLunar } from "../lib/lunar";
 
 /** Một lần diễn ra cụ thể của sự kiện (sự kiện lặp hằng năm có nhiều lần) */
 type Occurrence = { event: FamilyEvent; at: Date };
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 const solarText = (d: Date) => format(d, "d MMMM yyyy", { locale: vi });
 
@@ -50,7 +49,7 @@ const Events: React.FC = () => {
   useEffect(() => {
     const q = query(collection(db, "events"), orderBy("date", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FamilyEvent));
+      const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as FamilyEvent));
       setEvents(data);
       setLoading(false);
     }, (err) => {
@@ -62,15 +61,15 @@ const Events: React.FC = () => {
 
   const eventsOnSelectedDate: Occurrence[] = useMemo(() => {
     const from = startOfDay(selectedDate);
-    const to = new Date(from.getTime() + DAY_MS);
+    const to = addDays(from, 1);
     return events
       .flatMap((event) => occurrencesBetween(event, from, to).map((at) => ({ event, at })))
       .sort((a, b) => a.at.getTime() - b.at.getTime());
   }, [events, selectedDate]);
 
   const markedDays = useMemo(() => {
-    const from = new Date(viewStart.getTime() - 7 * DAY_MS);
-    const to = new Date(viewStart.getTime() + 45 * DAY_MS);
+    const from = addDays(viewStart, -7);
+    const to = addDays(viewStart, 45);
     return new Set(events.flatMap((e) => occurrencesBetween(e, from, to)).map(dayKey));
   }, [events, viewStart]);
 

@@ -20,7 +20,8 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return isAuthenticated() && request.auth.token.email == "hanhtoami@gmail.com";
+      return isAuthenticated() && request.auth.token.email == "hanhtoami@gmail.com" &&
+             request.auth.token.email_verified == true;
     }
 
     function userDocExists() {

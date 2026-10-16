@@ -25,7 +25,7 @@ const NewsDetail: React.FC = () => {
           setState("missing");
           return;
         }
-        setPost({ id: snap.id, ...snap.data() } as Post);
+        setPost({ ...snap.data(), id: snap.id } as Post);
         setState("ok");
       },
       // Bản nháp với khách: rules từ chối, coi như không có bài

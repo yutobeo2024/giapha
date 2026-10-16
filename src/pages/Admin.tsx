@@ -126,7 +126,7 @@ const Admin: React.FC = () => {
     void fetchMembers(true);
     return onSnapshot(
       query(collection(db, "events"), orderBy("date", "desc")),
-      (snap) => setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as FamilyEvent)),
+      (snap) => setEvents(snap.docs.map((d) => ({ ...d.data(), id: d.id }) as FamilyEvent)),
       (err) => setMessage({ type: "error", text: handleFirestoreError(err, OperationType.LIST, "events") })
     );
   }, [user, isEditor]);
@@ -135,7 +135,7 @@ const Admin: React.FC = () => {
     if (!user || !isAdmin) return;
     const unsubUsers = onSnapshot(
       query(collection(db, "users"), orderBy("createdAt", "desc")),
-      (snap) => setUsers(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as UserDoc)),
+      (snap) => setUsers(snap.docs.map((d) => ({ ...d.data(), id: d.id }) as UserDoc)),
       (err) => setMessage({ type: "error", text: handleFirestoreError(err, OperationType.LIST, "users") })
     );
     return () => unsubUsers();
@@ -280,7 +280,7 @@ const Admin: React.FC = () => {
         setMessage({ type: "error", text: `"${member.name}" không còn trong hệ thống (có thể đã bị xóa).` });
         return;
       }
-      const live = { id: snap.id, ...snap.data() } as FamilyMember;
+      const live = { ...snap.data(), id: snap.id } as FamilyMember;
       patchMembersCache(live.id, live);
       openModal(live);
     } catch (err) {

@@ -92,11 +92,11 @@ do {
   const docs = (await r.json()).filter((x) => x.document);
   for (const { document } of docs) {
     rows.push({
+      ...Object.fromEntries(Object.entries(document.fields || {}).map(([k, v]) => [k, decode(v)])),
       id: document.name.split("/").pop(),
       __ref: document.name,
       __createTime: document.createTime,
       __updateTime: document.updateTime,
-      ...Object.fromEntries(Object.entries(document.fields || {}).map(([k, v]) => [k, decode(v)])),
     });
   }
   pageToken = docs.length === 1000;

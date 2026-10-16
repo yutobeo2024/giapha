@@ -8,7 +8,7 @@ import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import type { FamilyMember } from "../types";
 import { avatarUrl } from "../lib/avatar";
 import { useMembers } from "../hooks/useMembers";
-import { parentLabel } from "../lib/lineage";
+import { parentLabel, treeParents } from "../lib/lineage";
 import { foldText } from "../lib/text";
 
 function cn(...inputs: ClassValue[]) {
@@ -45,22 +45,23 @@ const FamilyTree: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightId, members]);
 
+  // Người đứng trên mỗi người (cha, không thì mẹ); dữ liệu lỗi có vòng lặp đã được cắt sẵn
+  const parents = useMemo(() => treeParents(members), [members]);
   // Con của từng người, tính một lần (cây có hơn 1.500 người)
   const childrenOf = useMemo(() => {
     const map = new Map<string, FamilyMember[]>();
     for (const m of members) {
-      for (const p of [m.fatherId, m.motherId]) {
-        if (!p) continue;
-        if (!map.has(p)) map.set(p, []);
-        map.get(p)!.push(m);
-      }
+      const p = parents.get(m.id);
+      if (!p) continue;
+      if (!map.has(p)) map.set(p, []);
+      map.get(p)!.push(m);
     }
     return map;
-  }, [members]);
+  }, [members, parents]);
   const byId = useMemo(() => new Map(members.map(m => [m.id, m])), [members]);
 
-  // Gốc cây: thành viên không có cha lẫn mẹ (bất kể đời), để nhánh chưa nối vẫn hiển thị.
-  const roots = members.filter(m => !m.fatherId && !m.motherId);
+  // Gốc cây: người không có cha mẹ trong danh sách (bất kể đời, kể cả khi cha đã bị xóa), để nhánh chưa nối vẫn hiển thị.
+  const roots = members.filter(m => !parents.get(m.id));
 
   // Nhánh đang mở: mặc định mở đến đời OPEN_TO_GEN; bấm vào nút dưới mỗi người để mở/đóng nhánh con.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -84,13 +85,7 @@ const FamilyTree: React.FC = () => {
   /** Mở mọi nhánh tổ tiên của một người để người đó hiện trên sơ đồ */
   const revealMember = (id: string) => {
     const chain: string[] = [];
-    let cur = byId.get(id);
-    while (cur) {
-      const parentId = cur.fatherId || cur.motherId;
-      if (!parentId) break;
-      chain.push(parentId);
-      cur = byId.get(parentId);
-    }
+    for (let p = parents.get(id); p; p = parents.get(p)) chain.push(p);
     if (!chain.length) return;
     setExpanded(prev => new Set([...prev, ...chain]));
     setCollapsed(prev => {
