@@ -22,7 +22,6 @@
     "firebase": "^12.11.0",
     "firebase-auth-cloudflare-workers": "^2.0.6",
     "framer-motion": "^12.38.0",
-    "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.546.0",
     "postprocessing": "6.39",
