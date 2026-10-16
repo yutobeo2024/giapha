@@ -17,6 +17,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { STATUS_LABEL, type FamilyMember as Member } from "../types";
 import { avatarUrl } from "../lib/avatar";
 import { useMembers } from "../hooks/useMembers";
+import { parentLabel } from "../lib/lineage";
+import { foldText } from "../lib/text";
 
 /** Số thẻ hiện mỗi lần (danh sách có hơn 1.500 người) */
 const PAGE = 60;
@@ -35,6 +37,7 @@ const MemberList: React.FC = () => {
   }, [members, selectedMember]);
   useEffect(() => setLimit(PAGE), [searchTerm, selectedGeneration]);
 
+  const byId = useMemo(() => new Map(members.map(m => [m.id, m])), [members]);
   const childrenOf = useMemo(() => {
     const map = new Map<string, Member[]>();
     for (const m of members) {
@@ -65,9 +68,9 @@ const MemberList: React.FC = () => {
   }, [members]);
 
   const filteredMembers = useMemo(() => {
+    const q = foldText(searchTerm.trim());
     return members.filter(m => {
-      const matchesSearch = m.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                           (m.address && m.address.toLowerCase().includes(searchTerm.toLowerCase()));
+      const matchesSearch = !q || foldText(m.name).includes(q) || (!!m.address && foldText(m.address).includes(q));
       const matchesGen = selectedGeneration === "all" || m.generation === selectedGeneration;
       return matchesSearch && matchesGen;
     });
@@ -176,7 +179,7 @@ const MemberList: React.FC = () => {
                       </div>
                       <h3 className="font-serif text-lg font-bold text-[#2D2A26] mt-1 group-hover:text-[#8B2323] transition-colors">{member.name}</h3>
                       <p className="text-[10px] text-[#A19D96] font-medium mt-1">
-                        {member.address || "Chưa cập nhật địa chỉ"}
+                        {parentLabel(member, byId) || member.address || "Chưa cập nhật địa chỉ"}
                       </p>
                     </div>
                   </div>
