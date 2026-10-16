@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X, ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import type { FamilyMember } from "../../types";
 import { isAlive } from "../../types";
+import { parentLabel } from "../../lib/lineage";
 
 /** Bỏ dấu tiếng Việt để tìm tên không cần gõ dấu */
 export function normalizeVi(s: string): string {
@@ -31,6 +32,7 @@ export default function ExploreBar({ members, minGen, maxGen, activeGen, onPickM
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const byId = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
 
   const results = useMemo(() => {
     const nq = normalizeVi(q);
@@ -103,7 +105,10 @@ export default function ExploreBar({ members, minGen, maxGen, activeGen, onPickM
                 <li key={m.id}>
                   <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => pick(m)} className="intro-suggest-item">
                     <span className={`intro-dot ${isAlive(m) ? "intro-dot-alive" : ""}`} />
-                    <span className="font-serif font-bold text-[#fff0c8] truncate">{m.name}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-serif font-bold text-[#fff0c8] truncate">{m.name}</span>
+                      {parentLabel(m, byId) && <span className="block text-[11px] text-[#f5ead6]/60 truncate">{parentLabel(m, byId)}</span>}
+                    </span>
                     <span className="ml-auto text-[10px] tracking-[0.2em] uppercase text-[#f6c35b]/80 shrink-0">Đời {m.generation}</span>
                   </button>
                 </li>

@@ -8,6 +8,8 @@ import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import type { FamilyMember } from "../types";
 import { avatarUrl } from "../lib/avatar";
 import { useMembers } from "../hooks/useMembers";
+import { parentLabel } from "../lib/lineage";
+import { foldText } from "../lib/text";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -99,7 +101,7 @@ const FamilyTree: React.FC = () => {
   };
 
   const filteredMembers = members.filter(m => {
-    return m.name.toLowerCase().includes(searchTerm.toLowerCase());
+    return foldText(m.name).includes(foldText(searchTerm));
   });
 
   useEffect(() => {
@@ -174,7 +176,7 @@ const FamilyTree: React.FC = () => {
     const hasChildren = children.length > 0;
     const open = hasChildren && isOpen(member);
     const isHighlighted = member.id === highlightId;
-    const isSearchMatch = searchTerm && member.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const isSearchMatch = searchTerm && foldText(member.name).includes(foldText(searchTerm));
 
     return (
       <div className="flex flex-col items-center">
@@ -332,7 +334,10 @@ const FamilyTree: React.FC = () => {
                     />
                     <div>
                       <div className="text-sm font-bold text-[#2D2A26]">{m.name}</div>
-                      <div className="text-[10px] text-[#A19D96]">Thế hệ {m.generation}</div>
+                      <div className="text-[10px] text-[#A19D96]">
+                        Đời {m.generation}
+                        {parentLabel(m, byId) ? ` · ${parentLabel(m, byId)}` : ""}
+                      </div>
                     </div>
                   </button>
                 ))}

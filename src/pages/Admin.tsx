@@ -46,11 +46,13 @@ import { useAuthContext } from "../hooks/AuthContext";
 import { useMembers, fetchMembers, patchMembersCache, refreshMembersSnapshot } from "../hooks/useMembers";
 import PostsManager from "../components/admin/PostsManager";
 import BranchHeadsEditor from "../components/admin/BranchHeadsEditor";
+import ParentPicker from "../components/admin/ParentPicker";
 import Pager from "../components/admin/Pager";
 import EventDateField, { lunarDateError } from "../components/admin/EventDateField";
 import { describeOccurrence, displayOccurrence } from "../lib/eventDates";
 import { solarToLunar } from "../lib/lunar";
 import { foldText } from "../lib/text";
+import { indexMembers, derivedGeneration, lineageError, parentLabel } from "../lib/lineage";
 import { uploadPhoto, uploadMedia } from "../lib/image";
 import { avatarUrl } from "../lib/avatar";
 import { SEED_MEMBERS } from "../data/seedMembers";
@@ -165,6 +167,7 @@ const Admin: React.FC = () => {
 
   // Bảng thành viên: lọc theo tên/chi (không cần dấu) và đời, rồi chia trang
   useEffect(() => setPageNo(1), [memberSearch, memberGen]);
+  const memberIndex = useMemo(() => indexMembers(members), [members]);
   const generations = useMemo(() => Array.from(new Set(members.map((m) => m.generation))).sort((a, b) => a - b), [members]);
   const filteredMembers = useMemo(() => {
     const q = foldText(memberSearch.trim());
@@ -240,13 +243,14 @@ const Admin: React.FC = () => {
       });
   };
 
-  // Cha mẹ luôn ở đời liền trước: chỉ liệt kê đời đó (hơn 1.500 người thì danh sách đủ các đời không chọn nổi);
-  // người đang được chọn vẫn giữ dù khác đời
-  const parentOptions = (gender: FamilyMember["gender"], current?: string) => {
-    const gen = (formData.generation || 1) - 1;
-    return members.filter((m) => m.gender === gender && m.id !== editingItem?.id && (m.generation === gen || m.id === current));
-  };
-  const parentGenLabel = (formData.generation || 1) > 1 ? ` (đời ${(formData.generation || 1) - 1})` : "";
+  // Đời tính từ cha (Thủy tổ là đời 1): chọn cha xong thì ô Đời tự điền và khóa; chỉ khi chưa rõ cha mẹ mới chọn tay
+  const autoGen = derivedGeneration(formData, memberIndex.byId);
+  const setParent = (key: "fatherId" | "motherId", id: string | undefined) =>
+    setFormData((prev) => {
+      const next = { ...prev, [key]: id };
+      const g = derivedGeneration(next, memberIndex.byId);
+      return g ? { ...next, generation: g } : next;
+    });
 
   /** Firestore không nhận undefined: loại bỏ các key undefined/"" trước khi ghi. */
   const clean = <T extends object>(obj: T): T =>
@@ -301,6 +305,14 @@ const Admin: React.FC = () => {
     const dateError = col === "events" && formData.calendar === "lunar" ? lunarDateError(formData.lunar) : null;
     if (dateError) {
       setMessage({ type: "error", text: dateError });
+      return;
+    }
+    const lineageErr =
+      col === "members"
+        ? lineageError({ ...formData, generation: formData.generation || 1 }, editingItem as FamilyMember | null, memberIndex)
+        : null;
+    if (lineageErr) {
+      setMessage({ type: "error", text: lineageErr });
       return;
     }
     setLoading(true);
@@ -725,10 +737,13 @@ const Admin: React.FC = () => {
                           alt=""
                           className="w-10 h-10 rounded-full border border-[#E5E1D8] object-cover"
                         />
-                        <div className="font-bold text-[#2D2A26]">{member.name}</div>
+                        <div>
+                          <div className="font-bold text-[#2D2A26]">{member.name}</div>
+                          <div className="text-xs text-[#A19D96]">{parentLabel(member, memberIndex.byId)}</div>
+                        </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-[#6B665F]">Thế hệ {member.generation}</td>
+                    <td className="px-6 py-4 text-sm text-[#6B665F]">Đời {member.generation}</td>
                     <td className="px-6 py-4">
                       <span
                         className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
@@ -996,12 +1011,14 @@ const Admin: React.FC = () => {
                           />
                         </div>
                         <div>
-                          <label className={labelCls}>Thế hệ</label>
+                          <label className={labelCls}>Đời</label>
                           <select
                             required
-                            value={formData.generation || 1}
+                            value={autoGen ?? formData.generation ?? 1}
+                            disabled={autoGen !== null}
                             onChange={(e) => setFormData({ ...formData, generation: Number(e.target.value) })}
-                            className={inputCls}
+                            className={`${inputCls} disabled:opacity-70`}
+                            aria-label="Đời"
                           >
                             {[...Array(30)].map((_, i) => (
                               <option key={i + 1} value={i + 1}>
@@ -1009,6 +1026,9 @@ const Admin: React.FC = () => {
                               </option>
                             ))}
                           </select>
+                          <p className="text-[10px] text-[#A19D96] mt-1.5">
+                            {autoGen !== null ? "Tự tính = đời cha mẹ + 1" : "Chưa rõ cha mẹ: chọn đời bằng tay"}
+                          </p>
                         </div>
                         <div>
                           <label className={labelCls}>Giới tính</label>
@@ -1095,38 +1115,24 @@ const Admin: React.FC = () => {
                         <div className="md:col-span-2 border-t border-[#E5E1D8] pt-6 mt-2">
                           <h3 className="text-sm font-bold text-[#8B2323] mb-4">Mối quan hệ gia đình</h3>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                              <label className={labelCls}>Cha{parentGenLabel}</label>
-                              <select
-                                value={formData.fatherId || ""}
-                                onChange={(e) => setFormData({ ...formData, fatherId: e.target.value })}
-                                className={inputCls}
-                              >
-                                <option value="">Không có / Chưa rõ</option>
-                                {parentOptions("Nam", formData.fatherId)
-                                  .map((m) => (
-                                    <option key={m.id} value={m.id}>
-                                      {m.name} (Thế hệ {m.generation})
-                                    </option>
-                                  ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className={labelCls}>Mẹ{parentGenLabel}</label>
-                              <select
-                                value={formData.motherId || ""}
-                                onChange={(e) => setFormData({ ...formData, motherId: e.target.value })}
-                                className={inputCls}
-                              >
-                                <option value="">Không có / Chưa rõ</option>
-                                {parentOptions("Nữ", formData.motherId)
-                                  .map((m) => (
-                                    <option key={m.id} value={m.id}>
-                                      {m.name} (Thế hệ {m.generation})
-                                    </option>
-                                  ))}
-                              </select>
-                            </div>
+                            <ParentPicker
+                              label="Cha"
+                              gender="Nam"
+                              value={formData.fatherId}
+                              members={members}
+                              index={memberIndex}
+                              excludeId={editingItem?.id}
+                              onChange={(id) => setParent("fatherId", id)}
+                            />
+                            <ParentPicker
+                              label="Mẹ"
+                              gender="Nữ"
+                              value={formData.motherId}
+                              members={members}
+                              index={memberIndex}
+                              excludeId={editingItem?.id}
+                              onChange={(id) => setParent("motherId", id)}
+                            />
                           </div>
                         </div>
                       </>
