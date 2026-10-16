@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
+import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { motion } from "framer-motion";
 import {
   Users,
   History,
   Calendar,
-  Activity,
   ChevronRight,
   ArrowUpRight,
   Quote,
@@ -18,15 +17,15 @@ import {
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
 import { Link, useNavigate } from "react-router-dom";
-import type { ActivityLog, FamilyEvent, FamilyMember } from "../types";
-import { avatarUrl } from "../lib/avatar";
+import type { FamilyEvent, FamilyMember } from "../types";
+import BranchHeadsTable from "../components/BranchHeadsTable";
+import RecentActivities from "../components/RecentActivities";
 import { describeOccurrence, isLunarEvent, nextOccurrence } from "../lib/eventDates";
 import { solarToLunar } from "../lib/lunar";
 import { fetchMembers } from "../hooks/useMembers";
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [events, setEvents] = useState<FamilyEvent[]>([]);
   // Lần kế tiếp của từng sự kiện (giỗ lặp hằng năm có ngày gốc ở năm trước nên không lọc được bằng truy vấn)
   const upcomingEvents = useMemo(
@@ -67,11 +66,6 @@ const Dashboard: React.FC = () => {
       }
     };
 
-    const qActivities = query(collection(db, "activities"), orderBy("timestamp", "desc"), limit(4));
-    const unsubActivities = onSnapshot(qActivities, (snapshot) => {
-      setActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ActivityLog)));
-    }, (err) => setError(handleFirestoreError(err, OperationType.LIST, "activities")));
-
     // Lấy hết sự kiện (chỉ vài chục mục) rồi tự tính lần kế tiếp ở trên
     const qEvents = query(collection(db, "events"), orderBy("date", "asc"));
     const unsubEvents = onSnapshot(qEvents, (snapshot) => {
@@ -80,7 +74,6 @@ const Dashboard: React.FC = () => {
 
     fetchStats();
     return () => {
-      unsubActivities();
       unsubEvents();
     };
   }, []);
@@ -184,50 +177,23 @@ const Dashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-        {/* Left Column: Activities */}
-        <div className="lg:col-span-8 space-y-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-1.5 h-6 bg-[#8B2323] rounded-full" />
-              <h3 className="font-serif text-2xl font-bold text-[#2D2A26]">Hoạt Động Gần Đây</h3>
-            </div>
-            <Link to="/members" className="text-xs font-bold text-[#8B2323] flex items-center gap-1 hover:underline">
-              Xem thành viên <ArrowUpRight className="w-3 h-3" />
-            </Link>
-          </div>
+        {/* Left Column: Chi trưởng + Activities */}
+        <div className="lg:col-span-8 space-y-10">
+          <BranchHeadsTable />
 
-          <div className="grid gap-4">
-            {activities.length > 0 ? activities.map((activity, i) => (
-              <motion.div
-                key={activity.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.1 }}
-                className="bg-white p-6 rounded-3xl border border-[#E5E1D8] flex items-start gap-4 group hover:border-[#8B2323]/30 transition-all"
-              >
-                <img 
-                  src={activity.userPhoto || avatarUrl(activity.userName)}
-                  alt={activity.userName}
-                  referrerPolicy="no-referrer"
-                  className="w-12 h-12 rounded-2xl border border-[#E5E1D8] object-cover"
-                />
-                <div className="flex-grow">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-[#2D2A26] group-hover:text-[#8B2323] transition-colors">{activity.userName}</span>
-                    <span className="text-[10px] text-[#A19D96] font-medium">
-                      {format(new Date(activity.timestamp), "HH:mm, d MMM", { locale: vi })}
-                    </span>
-                  </div>
-                  <p className="text-sm text-[#6B665F]">{activity.action}</p>
-                </div>
-              </motion.div>
-            )) : (
-              <div className="py-12 text-center bg-white rounded-3xl border border-dashed border-[#E5E1D8]">
-                <Activity className="w-12 h-12 text-[#A19D96] opacity-20 mx-auto mb-4" />
-                <p className="text-[#A19D96] text-sm font-medium">Chưa có hoạt động mới nào.</p>
+          <section className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-1.5 h-6 bg-[#8B2323] rounded-full" />
+                <h3 className="font-serif text-2xl font-bold text-[#2D2A26]">Hoạt Động Gần Đây</h3>
               </div>
-            )}
-          </div>
+              <Link to="/members" className="text-xs font-bold text-[#8B2323] flex items-center gap-1 hover:underline">
+                Xem thành viên <ArrowUpRight className="w-3 h-3" />
+              </Link>
+            </div>
+
+            <RecentActivities onError={setError} />
+          </section>
         </div>
 
         {/* Right Column: Events & Founder */}

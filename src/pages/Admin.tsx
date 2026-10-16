@@ -45,6 +45,7 @@ import { useSearchParams } from "react-router-dom";
 import { useAuthContext } from "../hooks/AuthContext";
 import { useMembers, fetchMembers, patchMembersCache, refreshMembersSnapshot } from "../hooks/useMembers";
 import PostsManager from "../components/admin/PostsManager";
+import BranchHeadsEditor from "../components/admin/BranchHeadsEditor";
 import Pager from "../components/admin/Pager";
 import EventDateField, { lunarDateError } from "../components/admin/EventDateField";
 import { describeOccurrence, displayOccurrence } from "../lib/eventDates";
@@ -585,6 +586,8 @@ const Admin: React.FC = () => {
       {activeTab === "posts" && isAdmin && (
         <PostsManager user={user} initialEditId={searchParams.get("edit")} setMessage={setMessage} logActivity={logActivity} />
       )}
+
+      {activeTab === "settings" && <BranchHeadsEditor setMessage={setMessage} logActivity={logActivity} />}
 
       {activeTab === "settings" && (
         <div className="bg-white rounded-3xl border border-[#E5E1D8] shadow-sm p-6 sm:p-8 space-y-6">
