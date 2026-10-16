@@ -1,21 +1,51 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import Calendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
 import { motion, AnimatePresence } from "framer-motion";
 import { Calendar as CalendarIcon, MapPin, Clock, Info, ChevronRight, X } from "lucide-react";
-import { format, isSameDay, parseISO } from "date-fns";
+import { format } from "date-fns";
 import { vi } from "date-fns/locale";
 import type { FamilyEvent } from "../types";
 import { downloadIcs } from "../lib/ics";
+import { describeOccurrence, isLunarEvent, lunarNote, nextOccurrence, occurrencesBetween, startOfDay } from "../lib/eventDates";
+import { solarToLunar } from "../lib/lunar";
+
+/** Một lần diễn ra cụ thể của sự kiện (sự kiện lặp hằng năm có nhiều lần) */
+type Occurrence = { event: FamilyEvent; at: Date };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+const solarText = (d: Date) => format(d, "d MMMM yyyy", { locale: vi });
+
+/** Ô ngày bên trái thẻ sự kiện: sự kiện âm lịch hiện ngày/tháng âm */
+const DateBadge: React.FC<Occurrence & { className: string; dayCls: string }> = ({ event, at, className, dayCls }) => {
+  if (isLunarEvent(event)) {
+    const l = solarToLunar(at);
+    return (
+      <div className={className}>
+        <span className="text-[10px] font-bold uppercase">Th.{l.month}{l.leap ? "N" : ""} ÂL</span>
+        <span className={dayCls}>{l.day}</span>
+      </div>
+    );
+  }
+  return (
+    <div className={className}>
+      <span className="text-xs font-bold uppercase">{format(at, "MMM", { locale: vi })}</span>
+      <span className={dayCls}>{format(at, "d")}</span>
+    </div>
+  );
+};
 
 const Events: React.FC = () => {
   const [events, setEvents] = useState<FamilyEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [selectedEvent, setSelectedEvent] = useState<FamilyEvent | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<Occurrence | null>(null);
+  // Tháng đang xem trên lịch, để chấm đúng ngày của các sự kiện lặp hằng năm
+  const [viewStart, setViewStart] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 
   useEffect(() => {
     const q = query(collection(db, "events"), orderBy("date", "asc"));
@@ -30,12 +60,33 @@ const Events: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  const eventsOnSelectedDate = events.filter(e => isSameDay(parseISO(e.date), selectedDate));
+  const eventsOnSelectedDate: Occurrence[] = useMemo(() => {
+    const from = startOfDay(selectedDate);
+    const to = new Date(from.getTime() + DAY_MS);
+    return events
+      .flatMap((event) => occurrencesBetween(event, from, to).map((at) => ({ event, at })))
+      .sort((a, b) => a.at.getTime() - b.at.getTime());
+  }, [events, selectedDate]);
+
+  const markedDays = useMemo(() => {
+    const from = new Date(viewStart.getTime() - 7 * DAY_MS);
+    const to = new Date(viewStart.getTime() + 45 * DAY_MS);
+    return new Set(events.flatMap((e) => occurrencesBetween(e, from, to)).map(dayKey));
+  }, [events, viewStart]);
+
+  const upcoming: Occurrence[] = useMemo(
+    () =>
+      events
+        .map((event) => ({ event, at: nextOccurrence(event) }))
+        .filter((o): o is Occurrence => o.at !== null)
+        .sort((a, b) => a.at.getTime() - b.at.getTime())
+        .slice(0, 4),
+    [events]
+  );
 
   const tileContent = ({ date, view }: { date: Date; view: string }) => {
     if (view === "month") {
-      const hasEvent = events.some(e => isSameDay(parseISO(e.date), date));
-      if (hasEvent) {
+      if (markedDays.has(dayKey(date))) {
         return <div className="w-1 h-1 bg-[#8B2323] rounded-full mx-auto mt-1" />;
       }
     }
@@ -61,6 +112,8 @@ const Events: React.FC = () => {
             <Calendar
               onChange={(value) => setSelectedDate(value as Date)}
               value={selectedDate}
+              activeStartDate={viewStart}
+              onActiveStartDateChange={({ activeStartDate }) => activeStartDate && setViewStart(activeStartDate)}
               tileContent={tileContent}
               locale="vi-VN"
               className="w-full border-none font-sans"
@@ -70,7 +123,8 @@ const Events: React.FC = () => {
           <div className="bg-[#8B2323] p-8 rounded-3xl text-white shadow-lg relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2" />
             <CalendarIcon className="w-8 h-8 mb-4 opacity-50" />
-            <h3 className="text-xl font-bold mb-2">Ngày {format(selectedDate, "d MMMM", { locale: vi })}</h3>
+            <h3 className="text-xl font-bold mb-1">Ngày {format(selectedDate, "d MMMM", { locale: vi })}</h3>
+            <p className="text-white/70 text-xs italic mb-3">{lunarNote(selectedDate)}</p>
             <p className="text-white/80 text-sm">
               {eventsOnSelectedDate.length > 0 
                 ? `Có ${eventsOnSelectedDate.length} sự kiện diễn ra trong ngày này.`
@@ -96,20 +150,22 @@ const Events: React.FC = () => {
             </div>
           ) : eventsOnSelectedDate.length > 0 ? (
             <div className="space-y-4">
-              {eventsOnSelectedDate.map((event, i) => (
+              {eventsOnSelectedDate.map(({ event, at }, i) => (
                 <motion.div
                   key={event.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.1 }}
-                  onClick={() => setSelectedEvent(event)}
+                  onClick={() => setSelectedEvent({ event, at })}
                   className="bg-white p-6 rounded-2xl border border-[#E5E1D8] shadow-sm hover:border-[#8B2323]/30 cursor-pointer transition-all flex items-center justify-between group"
                 >
                   <div className="flex items-center gap-6">
-                    <div className="w-16 h-16 bg-[#FDFCF9] rounded-2xl border border-[#E5E1D8] flex flex-col items-center justify-center text-[#8B2323]">
-                      <span className="text-xs font-bold uppercase">{format(parseISO(event.date), "MMM", { locale: vi })}</span>
-                      <span className="text-2xl font-serif font-bold">{format(parseISO(event.date), "d")}</span>
-                    </div>
+                    <DateBadge
+                      event={event}
+                      at={at}
+                      className="w-16 h-16 shrink-0 bg-[#FDFCF9] rounded-2xl border border-[#E5E1D8] flex flex-col items-center justify-center text-[#8B2323]"
+                      dayCls="text-2xl font-serif font-bold"
+                    />
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="px-2 py-0.5 bg-[#FDFCF9] border border-[#E5E1D8] rounded text-[10px] font-bold uppercase text-[#8B2323]">
@@ -117,10 +173,11 @@ const Events: React.FC = () => {
                         </span>
                         <h4 className="font-bold text-[#2D2A26] group-hover:text-[#8B2323] transition-colors">{event.title}</h4>
                       </div>
-                      <div className="flex items-center gap-4 text-xs text-[#A19D96]">
+                      <OccurrenceLines event={event} at={at} />
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#A19D96] mt-1">
                         <div className="flex items-center gap-1">
                           <Clock className="w-3 h-3" />
-                          {format(parseISO(event.date), "HH:mm")}
+                          {format(at, "HH:mm")}
                         </div>
                         {event.location && (
                           <div className="flex items-center gap-1">
@@ -146,10 +203,7 @@ const Events: React.FC = () => {
           <div className="pt-8">
             <h3 className="font-serif text-xl font-bold mb-6">Sự kiện sắp tới</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {events
-                .filter(e => parseISO(e.date) > new Date())
-                .slice(0, 4)
-                .map((event, i) => (
+              {upcoming.map(({ event, at }, i) => (
                   <motion.div
                     key={event.id}
                     initial={{ opacity: 0, scale: 0.95 }}
@@ -158,15 +212,16 @@ const Events: React.FC = () => {
                     className="p-6 bg-white rounded-2xl border border-[#E5E1D8] shadow-sm flex flex-col justify-between"
                   >
                     <div>
-                      <div className="text-xs text-[#A19D96] font-bold uppercase mb-2">
-                        {format(parseISO(event.date), "d MMMM yyyy", { locale: vi })}
+                      <h4 className="font-bold text-[#2D2A26] mb-2">{event.title}</h4>
+                      <div className="mb-4">
+                        <OccurrenceLines event={event} at={at} />
                       </div>
-                      <h4 className="font-bold text-[#2D2A26] mb-4">{event.title}</h4>
                     </div>
                     <button
                       onClick={() => {
-                        setSelectedDate(parseISO(event.date));
-                        setSelectedEvent(event);
+                        setSelectedDate(at);
+                        setViewStart(new Date(at.getFullYear(), at.getMonth(), 1));
+                        setSelectedEvent({ event, at });
                       }}
                       className="text-sm font-bold text-[#8B2323] flex items-center gap-1 hover:gap-2 transition-all"
                     >
@@ -199,13 +254,13 @@ const Events: React.FC = () => {
               <div className="p-8">
                 <div className="flex justify-between items-start mb-6">
                   <div className="px-3 py-1 bg-[#8B2323] text-white rounded-full text-[10px] font-bold uppercase tracking-wider">
-                    {selectedEvent.type}
+                    {selectedEvent.event.type}
                   </div>
                   <button onClick={() => setSelectedEvent(null)} className="text-[#A19D96] hover:text-[#2D2A26]">
                     <X className="w-6 h-6" />
                   </button>
                 </div>
-                <h2 className="text-3xl font-serif font-bold text-[#2D2A26] mb-6">{selectedEvent.title}</h2>
+                <h2 className="text-3xl font-serif font-bold text-[#2D2A26] mb-6">{selectedEvent.event.title}</h2>
                 
                 <div className="space-y-4">
                   <div className="flex items-center gap-4 p-4 bg-[#FDFCF9] rounded-2xl border border-[#E5E1D8]">
@@ -214,30 +269,38 @@ const Events: React.FC = () => {
                     </div>
                     <div>
                       <div className="text-xs text-[#A19D96] uppercase font-bold">Thời gian</div>
-                      <div className="font-medium">{format(parseISO(selectedEvent.date), "HH:mm, d MMMM yyyy", { locale: vi })}</div>
+                      <div className="font-medium">
+                        {format(selectedEvent.at, "HH:mm")}, {describeOccurrence(selectedEvent.event, selectedEvent.at, solarText).primary}
+                      </div>
+                      <div className="text-xs text-[#6B665F] italic">
+                        {describeOccurrence(selectedEvent.event, selectedEvent.at, solarText).secondary}
+                      </div>
+                      {selectedEvent.event.recurring && (
+                        <div className="text-[10px] font-bold uppercase text-[#8B2323] mt-1">Lặp lại hằng năm</div>
+                      )}
                     </div>
                   </div>
 
-                  {selectedEvent.location && (
+                  {selectedEvent.event.location && (
                     <div className="flex items-center gap-4 p-4 bg-[#FDFCF9] rounded-2xl border border-[#E5E1D8]">
                       <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-[#8B2323] shadow-sm">
                         <MapPin className="w-5 h-5" />
                       </div>
                       <div>
                         <div className="text-xs text-[#A19D96] uppercase font-bold">Địa điểm</div>
-                        <div className="font-medium">{selectedEvent.location}</div>
+                        <div className="font-medium">{selectedEvent.event.location}</div>
                       </div>
                     </div>
                   )}
 
-                  {selectedEvent.description && (
+                  {selectedEvent.event.description && (
                     <div className="p-6 bg-gray-50 rounded-2xl border border-dashed border-[#E5E1D8]">
                       <div className="flex items-center gap-2 text-sm font-bold text-[#8B2323] mb-2">
                         <Info className="w-4 h-4" />
                         Mô tả chi tiết
                       </div>
                       <p className="text-[#6B665F] text-sm leading-relaxed">
-                        {selectedEvent.description}
+                        {selectedEvent.event.description}
                       </p>
                     </div>
                   )}
@@ -245,7 +308,7 @@ const Events: React.FC = () => {
 
                 <div className="mt-8 pt-8 border-t border-[#E5E1D8]">
                   <button
-                    onClick={() => downloadIcs(selectedEvent)}
+                    onClick={() => downloadIcs(selectedEvent.event, selectedEvent.at)}
                     className="w-full py-4 bg-[#8B2323] text-white rounded-2xl font-bold hover:bg-[#6B1B1B] transition-colors shadow-lg shadow-[#8B2323]/20"
                   >
                     Thêm vào lịch cá nhân (.ics)
@@ -257,6 +320,17 @@ const Events: React.FC = () => {
         )}
       </AnimatePresence>
     </div>
+  );
+};
+
+/** Ngày chính (lịch admin đã chọn) và dòng chú thích nhỏ quy đổi sang lịch kia */
+const OccurrenceLines: React.FC<Occurrence> = ({ event, at }) => {
+  const { primary, secondary } = describeOccurrence(event, at, solarText);
+  return (
+    <>
+      <div className="text-sm font-medium text-[#6B665F]">{primary}</div>
+      <div className="text-[11px] text-[#A19D96] italic">{secondary}</div>
+    </>
   );
 };
 

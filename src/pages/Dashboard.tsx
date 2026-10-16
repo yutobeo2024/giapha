@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { collection, query, orderBy, limit, where, onSnapshot } from "firebase/firestore";
+import React, { useState, useEffect, useMemo } from "react";
+import { collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../firebase";
 import { motion } from "framer-motion";
 import {
@@ -20,12 +20,24 @@ import { vi } from "date-fns/locale";
 import { Link, useNavigate } from "react-router-dom";
 import type { ActivityLog, FamilyEvent, FamilyMember } from "../types";
 import { avatarUrl } from "../lib/avatar";
+import { describeOccurrence, isLunarEvent, nextOccurrence } from "../lib/eventDates";
+import { solarToLunar } from "../lib/lunar";
 import { fetchMembers } from "../hooks/useMembers";
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [activities, setActivities] = useState<ActivityLog[]>([]);
-  const [upcomingEvents, setUpcomingEvents] = useState<FamilyEvent[]>([]);
+  const [events, setEvents] = useState<FamilyEvent[]>([]);
+  // Lần kế tiếp của từng sự kiện (giỗ lặp hằng năm có ngày gốc ở năm trước nên không lọc được bằng truy vấn)
+  const upcomingEvents = useMemo(
+    () =>
+      events
+        .map((event) => ({ event, at: nextOccurrence(event) }))
+        .filter((o): o is { event: FamilyEvent; at: Date } => o.at !== null)
+        .sort((a, b) => a.at.getTime() - b.at.getTime())
+        .slice(0, 3),
+    [events]
+  );
   const [founder, setFounder] = useState<FamilyMember | null>(null);
   const [stats, setStats] = useState({
     totalMembers: 0,
@@ -60,16 +72,10 @@ const Dashboard: React.FC = () => {
       setActivities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ActivityLog)));
     }, (err) => setError(handleFirestoreError(err, OperationType.LIST, "activities")));
 
-    // Chỉ lấy sự kiện từ hôm nay trở đi
-    const todayIso = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
-    const qEvents = query(
-      collection(db, "events"),
-      where("date", ">=", todayIso),
-      orderBy("date", "asc"),
-      limit(3)
-    );
+    // Lấy hết sự kiện (chỉ vài chục mục) rồi tự tính lần kế tiếp ở trên
+    const qEvents = query(collection(db, "events"), orderBy("date", "asc"));
     const unsubEvents = onSnapshot(qEvents, (snapshot) => {
-      setUpcomingEvents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FamilyEvent)));
+      setEvents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FamilyEvent)));
     }, (err) => setError(handleFirestoreError(err, OperationType.LIST, "events")));
 
     fetchStats();
@@ -239,18 +245,26 @@ const Dashboard: React.FC = () => {
                   Chưa có sự kiện sắp tới.
                 </div>
               )}
-              {upcomingEvents.map((event) => (
-                <div key={event.id} className="bg-white p-5 rounded-3xl border border-[#E5E1D8] flex gap-4 items-center">
-                  <div className="w-14 h-14 bg-[#8B2323] rounded-2xl flex flex-col items-center justify-center text-white">
-                    <span className="text-[10px] font-bold uppercase">{format(new Date(event.date), "MMM", { locale: vi })}</span>
-                    <span className="text-xl font-black">{format(new Date(event.date), "dd")}</span>
+              {upcomingEvents.map(({ event, at }) => {
+                const lunar = isLunarEvent(event) ? solarToLunar(at) : null;
+                const { primary, secondary } = describeOccurrence(event, at, (d) => format(d, "d MMMM yyyy", { locale: vi }));
+                return (
+                  <div key={event.id} className="bg-white p-5 rounded-3xl border border-[#E5E1D8] flex gap-4 items-center">
+                    <div className="w-14 h-14 shrink-0 bg-[#8B2323] rounded-2xl flex flex-col items-center justify-center text-white">
+                      <span className="text-[10px] font-bold uppercase">
+                        {lunar ? `Th.${lunar.month}${lunar.leap ? "N" : ""} ÂL` : format(at, "MMM", { locale: vi })}
+                      </span>
+                      <span className="text-xl font-black">{lunar ? String(lunar.day).padStart(2, "0") : format(at, "dd")}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[10px] font-bold uppercase text-[#8B2323] tracking-widest mb-1">{event.type}</div>
+                      <h4 className="font-bold text-[#2D2A26] text-sm">{event.title}</h4>
+                      <div className="text-xs text-[#6B665F] mt-0.5">{primary}</div>
+                      <div className="text-[11px] text-[#A19D96] italic">{secondary}</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-[10px] font-bold uppercase text-[#8B2323] tracking-widest mb-1">{event.type}</div>
-                    <h4 className="font-bold text-[#2D2A26] text-sm">{event.title}</h4>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
               <Link to="/events" className="w-full py-4 bg-[#FDFCF9] border border-[#E5E1D8] rounded-2xl text-xs font-bold text-[#6B665F] flex items-center justify-center gap-2 hover:bg-white transition-colors">
                 Xem lịch gia đình <ChevronRight className="w-4 h-4" />
               </Link>

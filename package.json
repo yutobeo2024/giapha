@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "wrangler pages dev dist",
     "lint": "tsc --noEmit && tsc -p functions/tsconfig.json && tsc -p backup-worker/tsconfig.json",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "node --test src/lib/*.test.ts"
   },
   "dependencies": {
     "@react-three/drei": "10.7",

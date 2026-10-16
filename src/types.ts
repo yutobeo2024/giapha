@@ -1,3 +1,5 @@
+import type { LunarDate } from "./lib/lunar";
+
 export type Gender = "Nam" | "Nữ";
 export type MemberStatus = "Alive" | "Deceased";
 export type UserRole = "user" | "editor" | "admin";
@@ -27,8 +29,14 @@ export type MemberInput = Omit<FamilyMember, "id">;
 export interface FamilyEvent {
   id: string;
   title: string;
-  /** ISO date-time string */
+  /** ISO date-time string: lần diễn ra đầu tiên (sự kiện âm lịch thì là ngày dương đã quy đổi) */
   date: string;
+  /** Lịch admin dùng khi nhập; thiếu = "solar" (sự kiện cũ) */
+  calendar?: "lunar" | "solar";
+  /** Ngày âm lịch admin nhập, chỉ có khi calendar = "lunar" */
+  lunar?: LunarDate;
+  /** Lặp lại hằng năm (theo lịch đã chọn) */
+  recurring?: boolean;
   location?: string;
   description?: string;
   type: EventType;
