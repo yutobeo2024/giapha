@@ -8,6 +8,7 @@
  *   monthly/YYYY-MM.json     bản đầu tiên của mỗi tháng, giữ vĩnh viễn
  *
  * Collection `users` (hồ sơ đăng nhập, vai trò) KHÔNG đọc được công khai nên không nằm trong bản sao lưu.
+ * `posts` chỉ đọc công khai được bài đã xuất bản (rules bắt buộc lọc), nên bài nháp cũng không được sao lưu.
  */
 
 export interface Env {
@@ -45,14 +46,24 @@ function decode(v: FirestoreValue): unknown {
   return v;
 }
 
-async function readCollection(env: Env, collectionId: string) {
+/**
+ * Điều kiện bắt buộc khi đọc công khai: rules chỉ cho khách đọc bài đã xuất bản,
+ * truy vấn không lọc sẽ bị từ chối cả collection (403).
+ */
+const PUBLIC_FILTERS: Record<string, unknown> = {
+  posts: { fieldFilter: { field: { fieldPath: "published" }, op: "EQUAL", value: { booleanValue: true } } },
+};
+
+export async function readCollection(env: Env, collectionId: string) {
   const url =
     `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}` +
     `/databases/${env.FIRESTORE_DATABASE_ID}/documents:runQuery`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ structuredQuery: { from: [{ collectionId }] } }),
+    body: JSON.stringify({
+      structuredQuery: { from: [{ collectionId }], ...(PUBLIC_FILTERS[collectionId] ? { where: PUBLIC_FILTERS[collectionId] } : {}) },
+    }),
   });
   if (!res.ok) throw new Error(`${collectionId}: HTTP ${res.status} ${await res.text()}`);
   const rows = (await res.json()) as { document?: FirestoreDoc }[];
