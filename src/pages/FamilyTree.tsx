@@ -27,7 +27,6 @@ const FamilyTree: React.FC = () => {
   const [viewMode, setViewMode] = useState<"tree" | "grid">("tree");
   const [searchParams] = useSearchParams();
   const highlightId = searchParams.get("highlight");
-  const treeRef = React.useRef<HTMLDivElement>(null);
   const modalRef = React.useRef<HTMLDivElement>(null);
   // Bấm sang cha/con/anh em trong khung chi tiết: cuộn khung về đầu để thấy tên người mới
   useEffect(() => {
@@ -117,74 +116,56 @@ const FamilyTree: React.FC = () => {
 
   const generations = Array.from(new Set(members.map(m => m.generation))).sort((a, b) => a - b);
 
-  const exportToPDF = async () => {
-    if (!treeRef.current) return;
-    
+  /** Bản in nhiều tờ thì hỏi trước (in rồi ghép lại) */
+  const confirmPages = (pages: number) =>
+    pages <= 12 || window.confirm(`Bản in cần ${pages} tờ A3, in xong ghép lại theo số tờ. Vẫn xuất?`);
+
+  /** Không truyền `branch`: in phần cây đang mở trên màn hình; có `branch`: in người đó và toàn bộ con cháu */
+  const exportPdf = async (branch?: FamilyMember) => {
     setExporting(true);
     try {
-      // Tải thư viện xuất PDF khi cần (~400KB) thay vì nhúng vào bundle chính
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
-      const element = treeRef.current;
-
-      // Use html2canvas to capture the tree with a balanced resolution
-      // Scale 2.5 is a good compromise between clarity and memory usage
-      const canvas = await html2canvas(element, {
-        scale: 2.5, 
-        useCORS: true,
-        logging: false,
-        backgroundColor: "#FDFCF9",
-        // Ensure we capture the full scrollable area
-        width: element.scrollWidth,
-        height: element.scrollHeight,
-        onclone: (clonedDoc) => {
-          // Ensure the cloned element is fully visible and not affected by any parent transforms
-          const clonedElement = clonedDoc.querySelector('.tree-export-container');
-          if (clonedElement instanceof HTMLElement) {
-            clonedElement.style.transform = "none";
-            clonedElement.style.position = "relative";
-            clonedElement.style.left = "0";
-            clonedElement.style.top = "0";
-            // Ensure all children are visible
-            clonedElement.style.visibility = "visible";
-            clonedElement.style.display = "inline-block";
-          }
-        }
-      });
-      
-      // Use JPEG with 0.95 quality to reduce memory compared to PNG
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      
-      // A3 Landscape dimensions in mm: 420 x 297
-      const pdf = new jsPDF({
-        orientation: "landscape",
-        unit: "mm",
-        format: "a3",
-        compress: true
-      });
-      
-      const pdfWidth = 420;
-      const pdfHeight = 297;
-      
-      const imgWidth = canvas.width;
-      const imgHeight = canvas.height;
-      
-      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
-      const finalWidth = imgWidth * ratio;
-      const finalHeight = imgHeight * ratio;
-      
-      // Center the image in the PDF
-      const x = (pdfWidth - finalWidth) / 2;
-      const y = (pdfHeight - finalHeight) / 2;
-      
-      // Use JPEG for PDF to keep file size manageable
-      pdf.addImage(imgData, "JPEG", x, y, finalWidth, finalHeight, undefined, "FAST");
-      pdf.save("Gia-Pha-Ho-Nguyen-Nhuan.pdf");
+      // Thư viện PDF và font chỉ tải khi bấm xuất
+      const { exportTreePdf, slugName } = await import("../lib/treePdf");
+      const kids = (m: FamilyMember) => childrenOf.get(m.id) || [];
+      await exportTreePdf(
+        branch
+          ? {
+              roots: [branch],
+              shown: kids,
+              subtitle: `Nhánh ${branch.name} (đời ${branch.generation})`,
+              fileName: `Gia-Pha-Nhanh-${slugName(branch.name)}.pdf`,
+              confirmPages,
+            }
+          : {
+              roots,
+              shown: (m) => (isOpen(m) ? kids(m) : []),
+              total: (m) => kids(m).length,
+              subtitle: "Phần cây đang mở trên màn hình",
+              fileName: "Gia-Pha-Ho-Nguyen-Nhuan.pdf",
+              confirmPages,
+            }
+      );
     } catch (error) {
       console.error("Export PDF failed:", error);
       alert("Có lỗi xảy ra khi xuất PDF. Vui lòng thử lại.");
     } finally {
       setExporting(false);
     }
+  };
+
+  /** Số con cháu của một người (để ghi trên nút xuất nhánh) */
+  const countDescendants = (m: FamilyMember) => {
+    let n = 0;
+    const seen = new Set<string>([m.id]);
+    const stack = [...(childrenOf.get(m.id) || [])];
+    while (stack.length) {
+      const c = stack.pop()!;
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      n++;
+      stack.push(...(childrenOf.get(c.id) || []));
+    }
+    return n;
   };
 
   // Recursive component for Tree View
@@ -286,8 +267,9 @@ const FamilyTree: React.FC = () => {
         <div className="flex flex-wrap items-center gap-4">
           {viewMode === "tree" && (
             <button
-              onClick={exportToPDF}
+              onClick={() => exportPdf()}
               disabled={exporting}
+              title="Xuất phần cây đang mở trên màn hình; cây rộng sẽ chia thành nhiều tờ A3 để ghép"
               className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-full text-sm font-medium hover:bg-emerald-700 transition-all shadow-md disabled:opacity-50"
             >
               {exporting ? (
@@ -410,7 +392,7 @@ const FamilyTree: React.FC = () => {
                 </div>
 
                 <TransformComponent wrapperClass="!w-full !h-[700px]" contentClass="!w-full !h-full flex items-center justify-center">
-                  <div ref={treeRef} className="p-20 inline-block bg-[#FDFCF9] tree-export-container">
+                  <div className="p-20 inline-block bg-[#FDFCF9]">
                     <div className="flex flex-col items-center gap-16">
                       {roots.map(ancestor => (
                         <div key={ancestor.id} className="mb-16 last:mb-0">
@@ -559,6 +541,22 @@ const FamilyTree: React.FC = () => {
                         "{selectedMember.biography}"
                       </p>
                     </div>
+                  )}
+
+                  {(childrenOf.get(selectedMember.id)?.length ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => exportPdf(selectedMember)}
+                      disabled={exporting}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-emerald-600 text-white rounded-2xl text-sm font-bold hover:bg-emerald-700 transition-all disabled:opacity-50"
+                    >
+                      {exporting ? (
+                        <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <FileDown className="w-4 h-4" />
+                      )}
+                      Xuất PDF nhánh này ({countDescendants(selectedMember) + 1} người)
+                    </button>
                   )}
 
                   {/* Relationships Section */}
