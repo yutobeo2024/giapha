@@ -153,7 +153,7 @@ Các script ghi dữ liệu thật đều dùng tài khoản Firebase CLI đã �
 
 | Script | Việc |
 |---|---|
-| `node scripts/restore-backup.mjs <file> [--only id1,id2] [--apply]` | Khôi phục `members`, `events` từ file sao lưu. Không xóa bản ghi đang có, chỉ tạo lại bản bị mất và ghi đè bản trùng id |
+| `node scripts/restore-backup.mjs <file> [--collections …] [--only id1,id2] [--apply]` | Khôi phục từ file sao lưu (mặc định `members`, `events`; thêm `--collections posts,settings` cho bài viết và cài đặt). Không xóa bản ghi đang có, chỉ tạo lại bản bị mất và ghi đè bản trùng id |
 | `node scripts/import-posts.mjs content/posts/<đợt> [--apply] [--overwrite]` | Tải ảnh của đợt bài lên R2 (qua wrangler) và ghi bài vào `posts`; bài đã có được giữ nguyên trừ khi `--overwrite` |
 | `node scripts/fill-branch.mjs [--apply] [--keep-sentence]` | Điền ô Chi tộc từ câu "Chi ông …" trong tiểu sử. Luôn sao lưu toàn bộ `members` ra `D:\GIA PHẢ\backup-members-truoc-dien-chi-<giờ>.json` trước khi ghi |
 
@@ -161,17 +161,16 @@ Sau khi script sửa `members`, xóa bản chụp `/api/members` (lệnh ở m�
 
 ## Sao lưu và khôi phục
 
-Worker riêng `giapha-backup` (thư mục `backup-worker/`) chạy **mỗi đêm lúc 02:00 giờ Việt Nam** (cron `0 19 * * *` UTC). Worker đọc các collection ghi trong biến `COLLECTIONS` của `backup-worker/wrangler.toml` (hiện là `members,events,activities`) qua Firestore REST, rồi ghi một file JSON vào bucket R2 `giapha-backups`:
+Worker riêng `giapha-backup` (thư mục `backup-worker/`) chạy **mỗi đêm lúc 02:00 giờ Việt Nam** (cron `0 19 * * *` UTC). Worker đọc các collection ghi trong biến `COLLECTIONS` của `backup-worker/wrangler.toml` (hiện là `members,events,activities,posts,settings`) qua Firestore REST, rồi ghi một file JSON vào bucket R2 `giapha-backups`:
 
 | Thư mục | Nội dung | Giữ |
 |---|---|---|
 | `daily/YYYY-MM-DD.json` | Bản mỗi đêm | 60 ngày gần nhất |
 | `monthly/YYYY-MM.json` | Bản đầu tiên của mỗi tháng | Vĩnh viễn |
 
-**Chưa được sao lưu:**
-- `posts`: bài nháp không đọc công khai được. Bản gốc của các đợt bài nằm trong `content/posts/`.
-- `settings`: Bảng chi trưởng, nhạc nền.
-- `users`: hồ sơ đăng nhập, vai trò. Nếu mất, người dùng đăng nhập lại và admin duyệt lại.
+Worker đọc không cần khóa (rules cho đọc công khai), nên:
+- `posts` chỉ sao lưu bài **đã xuất bản**. Bài nháp không nằm trong bản sao lưu; bản gốc các đợt bài soạn sẵn có trong `content/posts/`.
+- `users` (hồ sơ đăng nhập, vai trò) không được sao lưu. Nếu mất, người dùng đăng nhập lại và admin duyệt lại.
 
 Ảnh nằm trên R2 `giapha-photos`, vốn được Cloudflare lưu bền.
 
@@ -192,6 +191,7 @@ npx wrangler r2 object get giapha-backups/daily/2026-10-15.json --remote --file 
 node scripts/restore-backup.mjs backup.json                               # xem trước, không ghi gì
 node scripts/restore-backup.mjs backup.json --apply                       # ghi lại members + events
 node scripts/restore-backup.mjs backup.json --only nguyen-huu-chi --apply # chỉ khôi phục 1 người
+node scripts/restore-backup.mjs backup.json --collections posts,settings  # bài viết và cài đặt (mặc định chỉ members, events)
 ```
 
 Các file `D:\GIA PHẢ\backup-members-*.json` do script tạo ra trước mỗi lần sửa hàng loạt. File có tên `...truoc-dien-chi-...` cùng định dạng với backup-worker nên `restore-backup.mjs` đọc được. Các file cũ hơn là định dạng thô của Firestore.
