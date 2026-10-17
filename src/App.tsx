@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout";
 import ErrorBoundary from "./components/ErrorBoundary";
+import VersionGuard from "./components/VersionGuard";
 import { AuthProvider } from "./hooks/AuthContext";
 import Dashboard from "./pages/Dashboard";
 import MemberList from "./pages/MemberList";
@@ -20,6 +21,8 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <Router>
+          {/* Tab mở sẵn vẫn chạy mã cũ sau khi đưa bản mới lên: canh và tải lại */}
+          <VersionGuard />
           <Layout>
             <Routes>
               <Route path="/" element={<Dashboard />} />

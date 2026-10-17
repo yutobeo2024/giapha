@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useAuthContext } from "../hooks/AuthContext";
 import { avatarUrl } from "../lib/avatar";
+import { displayVersion } from "../lib/buildVersion";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -265,6 +266,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </p>
           <div className="text-xs text-[#A19D96] uppercase tracking-widest">
             © {new Date().getFullYear()} Nguyễn Nhuận Family Tree
+          </div>
+          {/* Để biết điện thoại đang chạy bản nào khi so với bản vừa đưa lên */}
+          <div className="text-[10px] text-[#C9C4BA] mt-2" data-build={displayVersion()}>
+            Bản {displayVersion()}
           </div>
         </div>
       </footer>

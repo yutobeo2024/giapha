@@ -145,10 +145,25 @@ Pages project `giapha` dùng **tải trực tiếp (direct upload), không nối
    ```bash
    npx wrangler pages deploy dist --project-name giapha --branch main --commit-dirty=true
    ```
-4. Kiểm tra site đã chạy bản mới: tên file `assets/index-*.js` trong mã trang phải trùng với bản vừa build.
+4. Kiểm tra site đã chạy bản mới: `https://giaphanguyennhuan.com/version.json` phải trả đúng mã bản vừa build (`dist/version.json`), hoặc xem dòng "Bản …" ở chân trang.
+5. Đặt tag để sau này quay lại được đúng bản này:
    ```bash
-   curl -s https://giaphanguyennhuan.com/tree | grep -o 'assets/index-[^"]*\.js'
+   git tag -a v1.2.0 -m "v1.2.0 - <điểm chính của bản>"
+   git push origin v1.2.0
+   gh release create v1.2.0 --title "v1.2.0" --notes "<điểm chính; id deployment Pages>"
    ```
+   Nhớ nâng `"version"` trong `package.json` trong PR của bản đó (mã bản lấy từ đây).
+
+### Mã bản và tự tải lại
+
+- `vite.config.ts` nhúng mã bản `<version>+<commit ngắn>` vào bundle (`__BUILD_ID__`) và ghi `dist/version.json`. Build khi cây làm việc có sửa chưa commit thì mã có thêm `-<giờ>`.
+- `src/components/VersionGuard.tsx`: tab đang mở (nhất là Safari trên iPhone) chuyển mục không tải lại file gốc nên có thể chạy mã cũ nhiều ngày. Mỗi lần chuyển mục hoặc tab hiện lại, nó hỏi `/version.json`; khác bản đang chạy thì tải lại trang. Ở `/admin` chỉ đánh dấu, chuyển mục mới tải lại (tránh mất dữ liệu đang nhập). Đã tải lại vì một bản mà vẫn cũ thì không tải lại nữa (tránh lặp khi CDN còn giữ bản cũ).
+
+### Quay lại bản cũ
+
+- Nhanh nhất, không cần build: Cloudflare → Pages → giapha → Deployments → chọn bản → *Rollback to this deployment*. Tab đang mở sẽ tự tải lại theo cơ chế trên.
+- Từ mã: `git checkout vX.Y.Z && npm ci && npm run build` rồi đưa `dist` lên như thường lệ.
+- Luật Firestore: `git checkout vX.Y.Z -- firestore.rules` rồi đẩy luật như bên dưới.
 
 Sửa `firestore.rules` hoặc `firestore.indexes.json` thì đẩy riêng bằng `npx firebase-tools deploy --only firestore` (tài khoản Firebase CLI là chủ project).
 
