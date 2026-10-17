@@ -9,7 +9,8 @@
     "preview": "wrangler pages dev dist",
     "lint": "tsc --noEmit && tsc -p functions/tsconfig.json && tsc -p backup-worker/tsconfig.json",
     "clean": "rm -rf dist",
-    "test": "node --test src/lib/*.test.ts test/*.test.ts"
+    "test": "node --test src/lib/*.test.ts test/*.test.ts",
+    "test:rules": "npx firebase-tools emulators:exec --only firestore --project demo-giapha \"node --test test/firestore-rules.emulator.mjs\""
   },
   "dependencies": {
     "@react-three/drei": "10.7",

@@ -44,25 +44,62 @@ service cloud.firestore {
       return isSuperAdmin() || (isActive() && userDoc().role in ['editor', 'admin']);
     }
 
+    // Dạng Date.toISOString(): 2026-10-17T01:00:00.000Z
     function isValidDateString(dateStr) {
       return dateStr is string &&
-        dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+        dateStr.matches("^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])T([01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(\\.\\d{1,3})?Z$");
+    }
+
+    // Trường không bắt buộc: thiếu, hoặc là chuỗi tối đa max ký tự
+    function optString(data, key, max) {
+      return !(key in data) || (data[key] is string && data[key].size() <= max);
+    }
+
+    // Như optString nhưng cho phép null (tài khoản Google có thể không có tên/ảnh)
+    function optStringOrNull(data, key, max) {
+      return !(key in data) || data[key] == null || (data[key] is string && data[key].size() <= max);
+    }
+
+    // Mã document (fatherId, motherId, memberId)
+    function optDocId(data, key) {
+      return !(key in data) || (data[key] is string && data[key].matches("^[A-Za-z0-9_-]{1,64}$"));
     }
 
     // ---------------- Validators ----------------
 
     function isValidMember(data) {
-      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+      return data.keys().hasOnly(["name", "gender", "generation", "birthDate", "deathDate", "branch", "role",
+                                  "biography", "fatherId", "motherId", "spouse", "address", "photoUrl", "status"]) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              data.gender in ["Nam", "Nữ"] &&
-             data.generation is number && data.generation >= 1 &&
+             data.generation is int && data.generation >= 1 && data.generation <= 100 &&
              (!("status" in data) || data.status in ["Alive", "Deceased"]) &&
-             (!("photoUrl" in data) || (data.photoUrl is string && data.photoUrl.size() < 1500000));
+             optDocId(data, "fatherId") && optDocId(data, "motherId") &&
+             optString(data, "birthDate", 100) && optString(data, "deathDate", 100) &&
+             optString(data, "branch", 200) && optString(data, "role", 200) &&
+             optString(data, "spouse", 500) && optString(data, "address", 500) &&
+             optString(data, "biography", 20000) && optString(data, "photoUrl", 2000);
+    }
+
+    function isValidLunar(l) {
+      return l is map && l.keys().hasOnly(["day", "month", "year", "leap"]) &&
+             l.day is int && l.day >= 1 && l.day <= 30 &&
+             l.month is int && l.month >= 1 && l.month <= 12 &&
+             l.year is int && l.year >= 1 && l.year <= 9999 &&
+             (!("leap" in l) || l.leap is bool);
     }
 
     function isValidEvent(data) {
-      return data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+      return data.keys().hasOnly(["title", "date", "calendar", "lunar", "recurring", "location",
+                                  "description", "type", "memberId"]) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
              isValidDateString(data.date) &&
-             data.type in ["Kỵ nhật", "Hội họp", "Khác"];
+             data.type in ["Kỵ nhật", "Hội họp", "Khác"] &&
+             (!("calendar" in data) || data.calendar in ["lunar", "solar"]) &&
+             (!("lunar" in data) || isValidLunar(data.lunar)) &&
+             (!("recurring" in data) || data.recurring is bool) &&
+             optString(data, "location", 500) && optString(data, "description", 5000) &&
+             optDocId(data, "memberId");
     }
 
     function isValidPost(data) {
@@ -75,10 +112,25 @@ service cloud.firestore {
              isValidDateString(data.createdAt) && isValidDateString(data.updatedAt);
     }
 
+    // Tên người ghi phải là tên hoặc email của chính tài khoản đang đăng nhập (không mạo danh được)
     function isValidActivity(data) {
-      return data.userName is string && data.userName.size() > 0 &&
-             data.action is string && data.action.size() > 0 &&
+      return data.keys().hasOnly(["userName", "userPhoto", "action", "timestamp"]) &&
+             data.userName is string && data.userName.size() > 0 &&
+             (data.userName == request.auth.token.get("name", null) ||
+              data.userName == request.auth.token.get("email", null)) &&
+             data.action is string && data.action.size() > 0 && data.action.size() <= 500 &&
+             optStringOrNull(data, "userPhoto", 2000) &&
              isValidDateString(data.timestamp);
+    }
+
+    // Hồ sơ người dùng: email phải là email đăng nhập thật; tên/ảnh lấy từ Google, có giới hạn độ dài
+    function isValidProfile(data) {
+      return data.keys().hasOnly(["email", "displayName", "photoURL", "role", "isLocked", "createdAt", "lastLogin"]) &&
+             (!("email" in data) || data.email == request.auth.token.get("email", null)) &&
+             optStringOrNull(data, "displayName", 100) &&
+             optStringOrNull(data, "photoURL", 2000) &&
+             (!("createdAt" in data) || data.createdAt is timestamp) &&
+             (!("lastLogin" in data) || data.lastLogin is timestamp);
     }
 
     // ---------------- members ----------------
@@ -126,6 +178,7 @@ service cloud.firestore {
       // Tự tạo hồ sơ lần đầu: bắt buộc role 'user' (chờ duyệt) và không khóa.
       // Super admin được tạo với role 'admin'.
       allow create: if isAuthenticated() && request.auth.uid == userId &&
+                    isValidProfile(request.resource.data) &&
                     request.resource.data.isLocked == false &&
                     (
                       request.resource.data.role == 'user' ||
@@ -133,9 +186,15 @@ service cloud.firestore {
                     );
 
       // Chính chủ chỉ được cập nhật thông tin hiển thị, KHÔNG được đụng role/isLocked.
+      // Email chỉ được đổi thành email đăng nhập thật.
       allow update: if isAuthenticated() && request.auth.uid == userId &&
                     request.resource.data.diff(resource.data).affectedKeys()
-                      .hasOnly(['displayName', 'photoURL', 'lastLogin', 'email']);
+                      .hasOnly(['displayName', 'photoURL', 'lastLogin', 'email']) &&
+                    (!('email' in request.resource.data.diff(resource.data).affectedKeys()) ||
+                     request.resource.data.email == request.auth.token.get("email", null)) &&
+                    optStringOrNull(request.resource.data, "displayName", 100) &&
+                    optStringOrNull(request.resource.data, "photoURL", 2000) &&
+                    (!("lastLogin" in request.resource.data) || request.resource.data.lastLogin is timestamp);
 
       // Admin duyệt (user -> editor), thu hồi, khóa/mở khóa.
       // Chỉ super admin mới được gán hoặc gỡ role 'admin'.
@@ -146,7 +205,8 @@ service cloud.firestore {
                       (request.resource.data.role != 'admin' && resource.data.role != 'admin')
                     );
 
-      allow delete: if isAdmin();
+      // Xóa hồ sơ = gỡ mọi quyền, nên chỉ super admin (admin thường xóa được admin khác là vượt quyền)
+      allow delete: if isSuperAdmin();
     }
   }
 }

@@ -36,12 +36,12 @@ Super admin là email cố định `hanhtoami@gmail.com`, khai báo ở **3 nơi
 |---|---|---|---|
 | `members` | mọi người | editor (xóa: admin) | xem trường ở `src/types.ts` (`FamilyMember`) |
 | `events` | mọi người | editor (xóa: admin) | `calendar: "solar" \| "lunar"`, `lunar {day, month, year, leap?}`, `recurring` |
-| `activities` | mọi người | editor tạo, không sửa | nhật ký "Hoạt động gần đây" |
+| `activities` | mọi người | editor tạo, không sửa | nhật ký "Hoạt động gần đây"; `userName` phải là tên Google hoặc email của chính người ghi |
 | `posts` | bài `published` | admin | id = đường dẫn `/thong-tin/<id>`; `kind: "article" \| "link"` |
 | `settings` | mọi người | admin | `site` (nhạc nền trang Giới thiệu), `branchHeads` (Bảng chi trưởng) |
-| `users` | chính chủ, admin | chính chủ tạo; admin đổi vai trò/khóa | không công khai, không sao lưu |
+| `users` | chính chủ, admin | chính chủ tạo; admin đổi vai trò/khóa; chỉ super admin xóa | không công khai, không sao lưu; `email` phải là email đăng nhập thật |
 
-Luật đầy đủ và kiểm tra kiểu dữ liệu nằm ở `firestore.rules`.
+Luật đầy đủ và kiểm tra kiểu dữ liệu nằm ở `firestore.rules`. `members` và `events` chỉ nhận đúng các trường trong `src/types.ts`, có giới hạn độ dài (ví dụ tiểu sử 20.000 ký tự, mô tả sự kiện 5.000), đời là số nguyên 1–100, `fatherId`/`motherId` là mã document, ngày là dạng `toISOString()`. Thêm trường mới vào biểu mẫu thì phải thêm vào luật, nếu không Firestore từ chối khi lưu.
 
 ### Đời và cha mẹ
 - **Thủy tổ Nguyễn Hữu Chỉ là đời 1**, đời con = đời cha + 1 (cùng cách đếm với Kỷ yếu Nguyễn Hữu Tộc 2023). Bài phát biểu của Hội đồng Gia tộc đếm Tiên tổ Nguyễn Dũng Cảm là đời 1: muốn đổi sang cách đếm trên trang thì **cộng 3**.
@@ -74,12 +74,14 @@ Mỗi thành viên tính một lượt đọc, nên các trang công khai **khô
 npm install
 npm run dev       # http://localhost:5173: chỉ front-end, đọc Firestore thật, không tải ảnh được
 npm test          # node --test src/lib/*.test.ts test/*.test.ts (âm lịch, sự kiện, .ics, dàn trang PDF, phả hệ; Functions và Worker sao lưu với mạng giả lập)
+npm run test:rules # firestore.rules trên Firestore emulator (cần Java), test/firestore-rules.emulator.mjs
 npm run lint      # tsc cho src/, functions/ và backup-worker/
 npm run build     # ra dist/
 npm run preview   # wrangler pages dev dist → http://localhost:8788, có Functions + R2 giả lập
 ```
 
 - `npm test` cần Node 22 trở lên (Node tự bỏ kiểu TypeScript). Trong `src/lib`, import giữa các file có bài thử phải ghi đuôi `.ts`.
+- Firestore emulator (Java) không mở được file khi đường dẫn có chữ có dấu (ví dụ `D:\GIA PHẢ\...`): chép `firebase.json`, `firestore.rules`, `firestore.indexes.json` và `test/` sang thư mục không dấu rồi chạy lệnh của `test:rules` (trong `package.json`) ở đó.
 - Khi thử giao diện có ghi dữ liệu, nên dùng Firebase emulator (`firebase emulators:start --only auth,firestore`) thay cho dữ liệu thật.
 
 ## Cấu trúc
@@ -125,7 +127,8 @@ scripts/
   restore-backup.mjs         khôi phục từ file sao lưu
   import-posts.mjs           nạp một đợt bài viết trong content/posts/<đợt>/
   fill-branch.mjs            chuyển chi tộc từ tiểu sử sang ô Chi tộc (đã chạy 16/10/2026)
-test/                        test cho functions/ và backup-worker/ (không để trong functions/ vì Pages coi file ở đó là route)
+test/                        test cho functions/ và backup-worker/ (không để trong functions/ vì Pages coi file ở đó là route),
+                             firestore-rules.emulator.mjs cho firestore.rules (npm run test:rules)
 content/posts/<đợt>/         bài viết soạn sẵn: posts.json, images/, README.md để duyệt
 public/fonts/                Be Vietnam Pro (OFL) cho bản PDF
 firestore.rules, firestore.indexes.json, firebase.json
