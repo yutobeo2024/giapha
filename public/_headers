@@ -1,0 +1,3 @@
+# version.json: trang đang mở hỏi để biết có bản mới, không được cache ở trình duyệt hay CDN
+/version.json
+  Cache-Control: no-store
