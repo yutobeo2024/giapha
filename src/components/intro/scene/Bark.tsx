@@ -44,8 +44,10 @@ function chainTube(chain: LayoutChain, quality: Quality): THREE.BufferGeometry {
   const thick = sorted.slice(0, Math.max(1, Math.ceil(sorted.length / 2)));
   const avgR = thick.reduce((s, r) => s + r, 0) / thick.length;
   const maxR = sorted[0];
-  const tubular = THREE.MathUtils.clamp(Math.round(length * (hi ? 6 : 4) + (maxR > 0.6 ? 12 : 0)), 6, 240);
-  const radial = maxR > 0.6 ? (hi ? 24 : 14) : maxR > 0.25 ? (hi ? 12 : 8) : hi ? 8 : 6;
+  // Twig (hơn 1.000 ống ngắn, mảnh): ít phân đoạn nhất có thể, vẫn gộp chung một mesh
+  const twig = chain.kind === "twig";
+  const tubular = THREE.MathUtils.clamp(Math.round(length * (hi ? 6 : 4) + (maxR > 0.6 ? 12 : 0)), twig ? (hi ? 5 : 4) : 6, 240);
+  const radial = twig ? (hi ? 6 : 5) : maxR > 0.6 ? (hi ? 24 : 14) : maxR > 0.25 ? (hi ? 12 : 8) : hi ? 8 : 6;
   const geo = new THREE.TubeGeometry(curve, tubular, 1, radial, false);
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const uv = geo.attributes.uv as THREE.BufferAttribute;
@@ -95,10 +97,12 @@ export default function Bark({ layout, growth, quality }: { layout: TreeLayout; 
     return merged;
   }, [layout, quality]);
 
-  // Nắp tròn ở hai đầu mọi chuỗi: ngọn thon kín, gốc cành con tròn trịa như cổ cành chứ không lộ mặt cắt
+  // Nắp tròn ở hai đầu mọi chuỗi: ngọn thon kín, gốc cành con tròn trịa như cổ cành chứ không lộ mặt cắt.
+  // Twig không nắp: gốc nằm trong gỗ cha, ngọn bị viên ngọc / đỉnh cuống lá che; nhờ vậy số nắp không tăng theo số người.
   const caps = useMemo(() => {
     const list: { pos: [number, number, number]; r: number; gen: number }[] = [];
     for (const c of layout.chains) {
+      if (c.kind === "twig") continue;
       const n = c.points.length - 1;
       list.push({ pos: c.points[n], r: c.radii[n], gen: c.gens[n] });
       list.push({ pos: c.points[0], r: c.radii[0] * (c.startInside ? 1.02 : 1), gen: c.gens[0] });
