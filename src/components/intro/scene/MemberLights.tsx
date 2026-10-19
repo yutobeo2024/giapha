@@ -45,11 +45,13 @@ function leafGeometry(): THREE.BufferGeometry {
   stem.computeVertexNormals();
   // ExtrudeGeometry không có chỉ mục, cuống phải bỏ chỉ mục thì mới ghép được
   const stemFlat = stem.toNonIndexed();
-  const merged = mergeGeometries([geo, stemFlat], false);
+  const merged = mergeGeometries([geo, stemFlat], false) ?? geo.clone();
   geo.dispose();
   stem.dispose();
-  if (!merged) return geo.clone();
   stemFlat.dispose();
+  // Dịch cả lá xuống một cuống: gốc instance (= nút trên cành = ngọn twig) trùng ĐỈNH cuống,
+  // nên lá đính vào cành, phóng to chỉ xòe xuống dưới và lắc quanh chỗ đính như lá thật
+  merged.translate(0, -PETIOLE, 0);
   return merged;
 }
 

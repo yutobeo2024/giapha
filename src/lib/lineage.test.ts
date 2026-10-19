@@ -103,3 +103,29 @@ test("cây 3D: người trong vòng lặp hoặc tự làm cha mình vẫn có m
   const layout = computeTreeLayout(list);
   assert.equal(layout.nodes.length, list.length);
 });
+
+test("cây 3D: mỗi người không có con có đúng một twig nối từ cha tới vị trí của mình", () => {
+  // R (thân) → A → B; K, L1, L2, L3, L4 không con; S là gốc phụ (cha đã xóa) có con T không con
+  const list = [
+    M("R", 1), M("A", 2, "R"), M("K", 2, "R"), M("B", 3, "A"), M("L1", 3, "A"), M("L2", 3, "A", { gender: "Nữ" }),
+    M("L3", 4, "B"), M("L4", 4, "B"), M("S", 2, "da-xoa"), M("T", 3, "S"),
+  ];
+  const layout = computeTreeLayout(list);
+  const parents = treeParents(list);
+  for (const c of layout.chains) {
+    assert.equal(c.radii.length, c.points.length, c.id);
+    assert.equal(c.gens.length, c.points.length, c.id);
+    assert.ok(c.points.every((p) => p.every(Number.isFinite)), `tọa độ ${c.id}`);
+  }
+  const leaves = layout.nodes.filter((n) => n.woodRadius === 0 && !n.isRoot);
+  assert.equal(leaves.length, 6);
+  for (const n of leaves) {
+    const tw = layout.chains.filter((c) => c.kind === "twig" && c.points[c.points.length - 1].every((x, i) => x === n.position[i]));
+    assert.equal(tw.length, 1, `${n.member.id} phải có đúng một twig`);
+    assert.ok(tw[0].startInside);
+    assert.deepEqual(tw[0].points[0], layout.byId.get(parents.get(n.member.id)!)!.position, `twig ${n.member.id} mọc từ cha`);
+    assert.equal(tw[0].gens[tw[0].gens.length - 1], n.member.generation);
+    assert.ok(tw[0].radii.every((r) => r >= 0.03 && r <= 0.08), `bán kính twig ${n.member.id}`);
+  }
+  assert.equal(layout.chains.filter((c) => c.kind === "twig").length, leaves.length);
+});

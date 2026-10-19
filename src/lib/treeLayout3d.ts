@@ -16,7 +16,8 @@ export interface LayoutNode {
   woodRadius: number;
 }
 
-export type ChainKind = "trunk" | "branch" | "root";
+/** twig: cành con mảnh nối người không có con vào gỗ của cha (dựng rẻ hơn, không nắp) */
+export type ChainKind = "trunk" | "branch" | "root" | "twig";
 
 /**
  * Một "trục" gỗ liền mạch như cây thật: thân chạy thẳng qua dòng chính, mỗi cành con là một chuỗi
@@ -121,7 +122,8 @@ function basis(d: Vec3): [Vec3, Vec3] {
  * - Thân: một đường cong liền từ rễ lên qua các đời đầu (dòng kế thừa gánh hầu hết hậu duệ), nghiêng nhẹ.
  * - Cành: mỗi người có con là một mắt cành; cành mọc tiếp theo hướng cành mẹ và từ từ ngoặt về phần tán
  *   được chia cho nhánh mình (chếch lên ở gốc cành, ngả dần ra ngoài, cành mảnh rủ ở ngọn).
- * - Người không có con không thành cành riêng mà treo thành chùm ở đầu cành của cha, như chùm lá.
+ * - Người không có con không thành cành riêng mà treo thành chùm ở đầu cành của cha, như chùm lá;
+ *   mỗi người được nối vào gỗ của cha bằng một cành con mảnh (twig) sau khi đã dọn chồng.
  */
 export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
   const children = new Map<string, FamilyMember[]>();
@@ -456,18 +458,23 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     return v3.add(v3.add(v3.add(a.position, v3.scale(d, 0.5)), [0, lift, 0]), v3.scale(side, wobble));
   };
 
-  /** Ngọn cành: vươn thêm một đoạn ngắn, thon dần và rủ nhẹ xuống như đầu cành non */
-  const finishTip = (chain: LayoutChain) => {
+  /**
+   * Ngọn cành: vươn thêm một đoạn ngắn, thon dần và rủ nhẹ xuống như đầu cành non.
+   * `short`: nút cuối có chùm người không con treo quanh thì ngọn chỉ vươn 60% để không đâm xuyên chùm
+   * (các twig đã nối từng người rồi, ngọn dài trông như một cành thừa không gắn ai).
+   */
+  const finishTip = (chain: LayoutChain, short = false) => {
     const n = chain.points.length;
     if (n < 2) return;
+    const k = short ? 0.6 : 1;
     const dir = v3.norm(v3.sub(chain.points[n - 1], chain.points[n - 2]));
     const flat = v3.norm([dir[0], Math.min(dir[1], 0.15), dir[2]]);
     const last = chain.points[n - 1];
     const g = chain.gens[n - 1];
-    chain.points.push(v3.add(last, v3.add(v3.scale(flat, 0.3), [0, -0.04, 0])));
+    chain.points.push(v3.add(last, v3.add(v3.scale(flat, 0.3 * k), [0, -0.04 * k, 0])));
     chain.radii.push(Math.max(TIP_RADIUS * 1.3, chain.radii[n - 1] * 0.55));
     chain.gens.push(g);
-    chain.points.push(v3.add(last, v3.add(v3.scale(flat, 0.55), [0, -0.14, 0])));
+    chain.points.push(v3.add(last, v3.add(v3.scale(flat, 0.55 * k), [0, -0.14 * k, 0])));
     chain.radii.push(TIP_RADIUS * 0.75);
     chain.gens.push(g);
   };
@@ -492,7 +499,7 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
       chain.gens.push(main.member.generation);
       cur = main;
     }
-    finishTip(chain);
+    finishTip(chain, leafKids(cur.member.id).length > 0);
   };
 
   /**
@@ -519,18 +526,35 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
     extend(chain, child, at.position);
   };
 
-  /** Chồi ngắn trên thân cho người không có con mà cha nằm trên thân chính */
-  const sprout = (at: LayoutNode, leaf: LayoutNode) => {
-    const out = v3.norm([leaf.position[0] - at.position[0], 0, leaf.position[2] - at.position[2]]);
-    const base = v3.add(v3.add(at.position, v3.scale(out, radiusAt(at) * 0.9)), [0, 0.12, 0]);
-    const d = v3.sub(leaf.position, base);
-    const mid = v3.add(v3.add(base, v3.scale(d, 0.55)), [0, v3.len(d) * 0.12, 0]);
+  /**
+   * Cành con mảnh (twig) cho người không có con: mọc từ trong lòng gỗ của cha, hơi vồng, kết thúc ĐÚNG tại nút
+   * nên viên ngọc / đỉnh cuống đèn lá luôn đính vào cành. Gọi sau các bước dọn chồng để tới vị trí cuối cùng.
+   * Dùng `at.woodRadius` chứ không `radiusAt`: gốc phụ (isRoot) mảnh mà radiusAt trả bán kính thân chính.
+   */
+  const twig = (at: LayoutNode, leaf: LayoutNode) => {
+    const rP = at.woodRadius || TIP_RADIUS;
+    const d = v3.sub(leaf.position, at.position);
+    const dist = v3.len(d);
+    const dir: Vec3 = dist > 1e-3 ? v3.scale(d, 1 / dist) : dirOf.get(at.member.id) || [0, 1, 0];
+    // Gốc twig ngay dưới vỏ cha (0.9 bán kính); người quá sát thì lấy nửa đường
+    const base = v3.add(at.position, v3.scale(dir, Math.min(rP * 0.9, dist * 0.5)));
+    const dd = v3.sub(leaf.position, base);
+    const L = v3.len(dd) || 1e-3;
+    const [side] = basis(dd);
+    const h = (s: number) => hash01(leaf.member.id, s) - 0.5;
+    const mid = v3.add(
+      v3.add(v3.add(base, v3.scale(dd, 0.5 + h(9) * 0.2)), [0, L * (0.08 + 0.08 * (h(10) + 0.5)), 0]),
+      v3.scale(side, h(12) * L * 0.2),
+    );
+    const r0 = clamp(rP * 0.6, 0.03, 0.08);
+    const g = leaf.member.generation;
     chains.push({
-      id: `${leaf.member.id}__sprout`,
-      kind: "branch",
+      id: `${leaf.member.id}__twig`,
+      kind: "twig",
       points: [at.position, base, mid, leaf.position],
-      radii: [0.08, 0.075, 0.055, TIP_RADIUS * 0.9],
-      gens: [leaf.member.generation - 0.9, leaf.member.generation - 0.7, leaf.member.generation - 0.4, leaf.member.generation],
+      radii: [r0, r0 * 0.9, (r0 + TIP_RADIUS) / 2, TIP_RADIUS * 0.8],
+      // Twig mọc xong đúng lúc đèn/đốm hiện (cả hai đủ tại visibleGen = g - 0.5)
+      gens: [g - 0.9, g - 0.7, g - 0.4, g],
       startInside: true,
     });
   };
@@ -561,9 +585,10 @@ export function computeTreeLayout(members: FamilyMember[]): TreeLayout {
       const fake: LayoutNode = { ...mainRoot, position: at(Math.min(n.position[1] - GEN_HEIGHT * 0.6, mainRoot.position[1])) };
       startSide(fake, n, [0, 1, 0]);
     }
+    // Mỗi người không có con một twig nối vào cha (cha trên thân hay ngoài thân đều vậy)
     for (const n of leafNodes) {
       const p = byId.get(parentOf(n.member)!);
-      if (p && isSpine(p)) sprout(p, n);
+      if (p) twig(p, n);
     }
     rootSpread = trunkBase * 1.5;
 
